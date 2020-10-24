@@ -17,10 +17,10 @@ const _ = grpc.SupportPackageIsVersion7
 //
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
 type VaultGrpcClient interface {
-	// FeedServicePipe offers a client service to a vault's feed repo.
-	// The client submits requests to be executed, and the server streams feed entries and completion status.
-	// The return stream remains open as long as the client stream remains open.
-	FeedServicePipe(ctx context.Context, opts ...grpc.CallOption) (VaultGrpc_FeedServicePipeClient, error)
+	// VaultSession offers a client service to a vault's feed repo.
+	// The client submits requests to be executed, and the vault streams response msgs.
+	// The session stream remains open as long as the client maintains its open.
+	VaultSession(ctx context.Context, opts ...grpc.CallOption) (VaultGrpc_VaultSessionClient, error)
 }
 
 type vaultGrpcClient struct {
@@ -31,31 +31,31 @@ func NewVaultGrpcClient(cc grpc.ClientConnInterface) VaultGrpcClient {
 	return &vaultGrpcClient{cc}
 }
 
-func (c *vaultGrpcClient) FeedServicePipe(ctx context.Context, opts ...grpc.CallOption) (VaultGrpc_FeedServicePipeClient, error) {
-	stream, err := c.cc.NewStream(ctx, &_VaultGrpc_serviceDesc.Streams[0], "/vault.VaultGrpc/FeedServicePipe", opts...)
+func (c *vaultGrpcClient) VaultSession(ctx context.Context, opts ...grpc.CallOption) (VaultGrpc_VaultSessionClient, error) {
+	stream, err := c.cc.NewStream(ctx, &_VaultGrpc_serviceDesc.Streams[0], "/vault.VaultGrpc/VaultSession", opts...)
 	if err != nil {
 		return nil, err
 	}
-	x := &vaultGrpcFeedServicePipeClient{stream}
+	x := &vaultGrpcVaultSessionClient{stream}
 	return x, nil
 }
 
-type VaultGrpc_FeedServicePipeClient interface {
-	Send(*FeedMsg) error
-	Recv() (*FeedMsg, error)
+type VaultGrpc_VaultSessionClient interface {
+	Send(*FeedReq) error
+	Recv() (*Msg, error)
 	grpc.ClientStream
 }
 
-type vaultGrpcFeedServicePipeClient struct {
+type vaultGrpcVaultSessionClient struct {
 	grpc.ClientStream
 }
 
-func (x *vaultGrpcFeedServicePipeClient) Send(m *FeedMsg) error {
+func (x *vaultGrpcVaultSessionClient) Send(m *FeedReq) error {
 	return x.ClientStream.SendMsg(m)
 }
 
-func (x *vaultGrpcFeedServicePipeClient) Recv() (*FeedMsg, error) {
-	m := new(FeedMsg)
+func (x *vaultGrpcVaultSessionClient) Recv() (*Msg, error) {
+	m := new(Msg)
 	if err := x.ClientStream.RecvMsg(m); err != nil {
 		return nil, err
 	}
@@ -66,10 +66,10 @@ func (x *vaultGrpcFeedServicePipeClient) Recv() (*FeedMsg, error) {
 // All implementations must embed UnimplementedVaultGrpcServer
 // for forward compatibility
 type VaultGrpcServer interface {
-	// FeedServicePipe offers a client service to a vault's feed repo.
-	// The client submits requests to be executed, and the server streams feed entries and completion status.
-	// The return stream remains open as long as the client stream remains open.
-	FeedServicePipe(VaultGrpc_FeedServicePipeServer) error
+	// VaultSession offers a client service to a vault's feed repo.
+	// The client submits requests to be executed, and the vault streams response msgs.
+	// The session stream remains open as long as the client maintains its open.
+	VaultSession(VaultGrpc_VaultSessionServer) error
 	mustEmbedUnimplementedVaultGrpcServer()
 }
 
@@ -77,8 +77,8 @@ type VaultGrpcServer interface {
 type UnimplementedVaultGrpcServer struct {
 }
 
-func (UnimplementedVaultGrpcServer) FeedServicePipe(VaultGrpc_FeedServicePipeServer) error {
-	return status.Errorf(codes.Unimplemented, "method FeedServicePipe not implemented")
+func (UnimplementedVaultGrpcServer) VaultSession(VaultGrpc_VaultSessionServer) error {
+	return status.Errorf(codes.Unimplemented, "method VaultSession not implemented")
 }
 func (UnimplementedVaultGrpcServer) mustEmbedUnimplementedVaultGrpcServer() {}
 
@@ -93,26 +93,26 @@ func RegisterVaultGrpcServer(s *grpc.Server, srv VaultGrpcServer) {
 	s.RegisterService(&_VaultGrpc_serviceDesc, srv)
 }
 
-func _VaultGrpc_FeedServicePipe_Handler(srv interface{}, stream grpc.ServerStream) error {
-	return srv.(VaultGrpcServer).FeedServicePipe(&vaultGrpcFeedServicePipeServer{stream})
+func _VaultGrpc_VaultSession_Handler(srv interface{}, stream grpc.ServerStream) error {
+	return srv.(VaultGrpcServer).VaultSession(&vaultGrpcVaultSessionServer{stream})
 }
 
-type VaultGrpc_FeedServicePipeServer interface {
-	Send(*FeedMsg) error
-	Recv() (*FeedMsg, error)
+type VaultGrpc_VaultSessionServer interface {
+	Send(*Msg) error
+	Recv() (*FeedReq, error)
 	grpc.ServerStream
 }
 
-type vaultGrpcFeedServicePipeServer struct {
+type vaultGrpcVaultSessionServer struct {
 	grpc.ServerStream
 }
 
-func (x *vaultGrpcFeedServicePipeServer) Send(m *FeedMsg) error {
+func (x *vaultGrpcVaultSessionServer) Send(m *Msg) error {
 	return x.ServerStream.SendMsg(m)
 }
 
-func (x *vaultGrpcFeedServicePipeServer) Recv() (*FeedMsg, error) {
-	m := new(FeedMsg)
+func (x *vaultGrpcVaultSessionServer) Recv() (*FeedReq, error) {
+	m := new(FeedReq)
 	if err := x.ServerStream.RecvMsg(m); err != nil {
 		return nil, err
 	}
@@ -125,8 +125,8 @@ var _VaultGrpc_serviceDesc = grpc.ServiceDesc{
 	Methods:     []grpc.MethodDesc{},
 	Streams: []grpc.StreamDesc{
 		{
-			StreamName:    "FeedServicePipe",
-			Handler:       _VaultGrpc_FeedServicePipe_Handler,
+			StreamName:    "VaultSession",
+			Handler:       _VaultGrpc_VaultSession_Handler,
 			ServerStreams: true,
 			ClientStreams: true,
 		},
