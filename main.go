@@ -5,7 +5,7 @@ import (
 	"flag"
 	"log"
 
-	"github.com/plan-systems/plan-vault-libp2p/node"
+	"github.com/plan-systems/plan-vault-libp2p/p2p"
 	"github.com/plan-systems/plan-vault-libp2p/server"
 )
 
@@ -13,7 +13,7 @@ func main() {
 	flag.Parse()
 	ctx := context.Background()
 
-	host, err := node.New(ctx)
+	host, err := p2p.New(ctx)
 	if err != nil {
 		log.Fatal(err)
 	}
