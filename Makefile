@@ -20,7 +20,7 @@ GOFILES = $(shell find . -type f -name '*.go')
 build: bin/vault
 
 bin/vault: $(GOFILES)
-	go build -o bin/vault
+	GOPRIVATE='github.com/libp2p/*' go build -o bin/vault
 
 
 # ----------------------------------------
