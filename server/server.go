@@ -1,18 +1,40 @@
 package server
 
 import (
+	"context"
+	"fmt"
 	"io"
 	"log"
+	"net"
+
+	"github.com/libp2p/go-libp2p-core/host"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials"
 
 	pb "github.com/plan-systems/plan-vault-libp2p/protos"
-	"google.golang.org/grpc"
 )
 
-var DefaultPort = int(pb.Const_DefaultGrpcServicePort)
+func Run(ctx context.Context, nodeHost *host.Host) {
+	listener, err := net.Listen("tcp", fmt.Sprintf("%s:%d", *grpcAddr, *grpcPort))
+	if err != nil {
+		log.Fatalf("failed to set up listener: %v", err)
+	}
 
-func RegisterVaultServer(grpcServer *grpc.Server) {
+	var opts []grpc.ServerOption
+	if *tls {
+		creds, err := credentials.NewServerTLSFromFile(*certFile, *keyFile)
+		if err != nil {
+			log.Fatalf("failed to generate tls creds: %v", err)
+		}
+		opts = []grpc.ServerOption{grpc.Creds(creds)}
+	}
+
+	// TODO: look thru the options to thread a context thru here
+	grpcServer := grpc.NewServer(opts...)
+
 	vaultSrv := &VaultServer{}
 	pb.RegisterVaultGrpcServer(grpcServer, vaultSrv)
+	grpcServer.Serve(listener)
 }
 
 type VaultServer struct {
