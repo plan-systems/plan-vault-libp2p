@@ -12,9 +12,10 @@ import (
 	"google.golang.org/grpc/credentials"
 
 	pb "github.com/plan-systems/plan-vault-libp2p/protos"
+	"github.com/plan-systems/plan-vault-libp2p/store"
 )
 
-func Run(ctx context.Context, nodeHost *host.Host) {
+func Run(ctx context.Context, nodeHost *host.Host, db *store.Store) {
 	listener, err := net.Listen("tcp", fmt.Sprintf("%s:%d", *grpcAddr, *grpcPort))
 	if err != nil {
 		log.Fatalf("failed to set up listener: %v", err)
@@ -32,13 +33,16 @@ func Run(ctx context.Context, nodeHost *host.Host) {
 	// TODO: look thru the options to thread a context thru here
 	grpcServer := grpc.NewServer(opts...)
 
-	vaultSrv := &VaultServer{}
+	vaultSrv := &VaultServer{nodeHost: nodeHost, db: db}
 	pb.RegisterVaultGrpcServer(grpcServer, vaultSrv)
 	grpcServer.Serve(listener)
 }
 
 type VaultServer struct {
 	pb.UnimplementedVaultGrpcServer
+
+	nodeHost *host.Host
+	db       *store.Store
 }
 
 func (v *VaultServer) VaultSession(stream pb.VaultGrpc_VaultSessionServer) error {
