@@ -3,6 +3,7 @@ module github.com/plan-systems/plan-vault-libp2p
 go 1.15
 
 require (
+	github.com/dgraph-io/badger/v2 v2.2007.2
 	github.com/golang/protobuf v1.4.3
 	github.com/libp2p/go-libp2p v0.11.0
 	github.com/libp2p/go-libp2p-connmgr v0.2.4
