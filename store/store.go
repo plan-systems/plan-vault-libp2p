@@ -64,7 +64,7 @@ type StoreKey = []byte
 
 func New(ctx context.Context, cfg Config) (*Store, error) {
 
-	db, err := badger.Open(badger.DefaultOptions(cfg.DataDir))
+	db, err := badger.Open(cfg.DB)
 	if err != nil {
 		return nil, err
 	}

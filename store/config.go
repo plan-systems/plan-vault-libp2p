@@ -4,6 +4,7 @@ import (
 	"flag"
 	"log"
 
+	"github.com/dgraph-io/badger/v2"
 	"github.com/libp2p/go-libp2p-core/crypto"
 )
 
@@ -15,6 +16,7 @@ var (
 type Config struct {
 	DataDir string
 	PeerID  [32]byte
+	DB      badger.Options
 }
 
 func DefaultConfig() Config {
@@ -32,7 +34,8 @@ func DefaultConfig() Config {
 	copy(k[:], buf[:])
 
 	return Config{
-		DataDir: *dataDir,
-		PeerID:  k,
+		//DataDir: *dataDir,
+		PeerID: k,
+		DB:     badger.DefaultOptions(*dataDir),
 	}
 }
