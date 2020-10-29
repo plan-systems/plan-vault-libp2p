@@ -3,36 +3,43 @@ package store
 import (
 	"context"
 	"fmt"
-	"io/ioutil"
-	"os"
 	"sync"
 	"testing"
 
+	"github.com/dgraph-io/badger/v2"
 	"github.com/stretchr/testify/require"
 
 	"github.com/plan-systems/plan-vault-libp2p/helpers"
 )
 
-func TestStoreSubscribe(t *testing.T) {
-
+func TestStore_Subscribe_FromEmpty(t *testing.T) {
+	t.Parallel()
 	require := require.New(t)
 
-	dir, err := ioutil.TempDir("", t.Name())
-	if err != nil {
-		t.Fatalf(err.Error())
-	}
-	defer os.RemoveAll(dir) // clean up
+	channel, ctx, cancel := setup(t)
+	defer cancel()
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel() // shutdown the store
+	sub := NewMockSubscriber(ctx)
+	sub.expect(2)
+	channel.Subscribe(ctx, sub, 0, Tail)
 
-	cfg := DefaultConfig()
-	cfg.DataDir = dir
-	store, _ := New(ctx, cfg)
+	txnID, err := channel.Append([]byte("message 1"))
+	require.NoError(err)
+	require.Equal(uint64(1), txnID)
 
-	channelID := helpers.ChannelURItoChannelID(t.Name())
-	fmt.Printf("channelID %x\n", channelID)
-	channel := store.Channel(channelID)
+	txnID, err = channel.Append([]byte("message 2"))
+	require.NoError(err)
+	require.Equal(uint64(2), txnID)
+
+	sub.wait()
+	require.Equal(2, sub.count)
+}
+
+func TestStore_Subscribe_DetectNewWrites(t *testing.T) {
+	t.Parallel()
+	require := require.New(t)
+	channel, ctx, cancel := setup(t)
+	defer cancel()
 
 	txnID1, err := channel.Append([]byte("message 1"))
 	require.NoError(err)
@@ -46,9 +53,47 @@ func TestStoreSubscribe(t *testing.T) {
 	require.NoError(err)
 	require.Equal(uint64(3), txnID3)
 
-	msg, err := channel.get(txnID1)
-	fmt.Println(msg)
-	fmt.Println(err)
+	sub := NewMockSubscriber(ctx)
+	sub.expect(2)
+	channel.Subscribe(ctx, sub, txnID2, Tail)
+	sub.wait()
+
+	require.Equal(2, sub.count)
+
+	sub.expect(2)
+
+	_, err = channel.Append([]byte("message 4"))
+	require.NoError(err)
+
+	_, err = channel.Append([]byte("message 5"))
+	require.NoError(err)
+
+	sub.wait()
+
+	require.Equal(4, sub.count)
+
+	msg, err := channel.get(uint64(3))
+	require.NoError(err)
+	require.Equal("message 3", string(msg))
+}
+
+func TestStore_Subscribe_Reset(t *testing.T) {
+	t.Parallel()
+	require := require.New(t)
+	channel, ctx, cancel := setup(t)
+	defer cancel()
+
+	txnID1, err := channel.Append([]byte("message 1"))
+	require.NoError(err)
+	require.Equal(uint64(1), txnID1)
+
+	txnID2, err := channel.Append([]byte("message 2"))
+	require.NoError(err)
+	require.Equal(uint64(2), txnID2)
+
+	txnID3, err := channel.Append([]byte("message 3"))
+	require.NoError(err)
+	require.Equal(uint64(3), txnID3)
 
 	sub := NewMockSubscriber(ctx)
 	sub.expect(2)
@@ -56,8 +101,90 @@ func TestStoreSubscribe(t *testing.T) {
 	sub.wait()
 
 	require.Equal(2, sub.count)
-	require.NoError(err)
 
+	sub.expect(3)
+	channel.Subscribe(ctx, sub, txnID1, Tail)
+	sub.wait()
+
+	require.Equal(5, sub.count)
+
+	sub.expect(2)
+	channel.Subscribe(ctx, sub, txnID1, 2)
+	sub.wait()
+	require.Equal(7, sub.count)
+
+	msg, err := channel.get(uint64(3))
+	require.NoError(err)
+	require.Equal("message 3", string(msg))
+}
+
+func TestStore_Subscribe_ResetConcurrentAppends(t *testing.T) {
+	t.Parallel()
+	require := require.New(t)
+	channel, ctx, cancel := setup(t)
+	defer cancel()
+
+	txnID1, err := channel.Append([]byte("message 1"))
+	require.NoError(err)
+	require.Equal(uint64(1), txnID1)
+
+	txnID2, err := channel.Append([]byte("message 2"))
+	require.NoError(err)
+	require.Equal(uint64(2), txnID2)
+
+	txnID3, err := channel.Append([]byte("message 3"))
+	require.NoError(err)
+	require.Equal(uint64(3), txnID3)
+
+	sub := NewMockSubscriber(ctx)
+	sub.expect(2)
+	channel.Subscribe(ctx, sub, txnID2, Tail)
+	sub.wait()
+
+	require.Equal(2, sub.count)
+
+	sub.expect(5)
+
+	// we're now resetting the subscription while a concurrent write
+	// is coming.  we can't make any guarantees about the order of
+	// events here and we'll get the last message repeated.
+	channel.Subscribe(ctx, sub, txnID1, Tail)
+	_, err = channel.Append([]byte("message 4"))
+	require.NoError(err)
+	sub.wait()
+
+	require.Equal(7, sub.count)
+
+	msg, err := channel.get(uint64(4))
+	require.NoError(err)
+	require.Equal("message 4", string(msg))
+
+	_, err = channel.get(uint64(5))
+	require.Error(err)
+	require.EqualError(err, badger.ErrKeyNotFound.Error())
+
+}
+
+func setup(t *testing.T) (*Channel, context.Context, func()) {
+
+	ctx, cancel := context.WithCancel(context.Background())
+
+	cfg := DefaultConfig()
+	cfg.DB = cfg.DB.
+		WithDir("").                     // need to unset for in-memory
+		WithValueDir("").                // need to unset for in-memory
+		WithInMemory(true).              // no cleanup
+		WithLoggingLevel(badger.WARNING) // avoid test noise
+
+	store, err := New(ctx, cfg)
+	if err != nil {
+		t.Fatalf(err.Error())
+	}
+
+	channelID := helpers.ChannelURItoChannelID(t.Name())
+	channel := store.Channel(channelID)
+
+	return channel, ctx, cancel
 }
 
 type MockSubscriber struct {
@@ -96,10 +223,9 @@ func (sub *MockSubscriber) run() {
 		select {
 		case <-sub.ctx.Done():
 			return
-		case recv := <-sub.rx:
+		case <-sub.rx:
 			sub.count++
 			sub.wg.Done()
-			fmt.Printf("received: %v\n", recv)
 		}
 	}
 }
