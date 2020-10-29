@@ -2,7 +2,7 @@
 
 _An implementation of the PLAN storage layer using libp2p_
 
-[![Build Status](https://github.com/plan-systems/plan-vault-libp2p/workflows/Build%20and%20test/badge.svg)](https://github.com/plan-systems/plan-vault-libp2p/actions)
+[![Build Status](https://github.com/plan-systems/plan-vault-libp2p/workflows/Build/badge.svg)](https://github.com/plan-systems/plan-vault-libp2p/actions)
 
 ### Development status
 
