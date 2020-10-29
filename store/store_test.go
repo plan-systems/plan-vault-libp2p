@@ -171,13 +171,7 @@ func TestStore_Restore_Channel(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	cfg := DefaultConfig()
-	cfg.DB = cfg.DB.
-		WithDir("").                     // need to unset for in-memory
-		WithValueDir("").                // need to unset for in-memory
-		WithInMemory(true).              // no cleanup
-		WithLoggingLevel(badger.WARNING) // avoid test noise
-
+	cfg := testConfig()
 	store, err := New(ctx, cfg)
 	if err != nil {
 		t.Fatalf(err.Error())
@@ -210,14 +204,7 @@ func TestStore_Restore_Channel(t *testing.T) {
 func setup(t *testing.T) (*Channel, context.Context, func()) {
 
 	ctx, cancel := context.WithCancel(context.Background())
-
-	cfg := DefaultConfig()
-	cfg.DB = cfg.DB.
-		WithDir("").                     // need to unset for in-memory
-		WithValueDir("").                // need to unset for in-memory
-		WithInMemory(true).              // no cleanup
-		WithLoggingLevel(badger.WARNING) // avoid test noise
-
+	cfg := testConfig()
 	store, err := New(ctx, cfg)
 	if err != nil {
 		t.Fatalf(err.Error())
@@ -230,6 +217,16 @@ func setup(t *testing.T) (*Channel, context.Context, func()) {
 	}
 
 	return channel, ctx, cancel
+}
+
+func testConfig() Config {
+	cfg := DefaultConfig()
+	cfg.DB = cfg.DB.
+		WithDir("").                     // need to unset for in-memory
+		WithValueDir("").                // need to unset for in-memory
+		WithInMemory(true).              // no cleanup
+		WithLoggingLevel(badger.WARNING) // avoid test noise
+	return cfg
 }
 
 type MockSubscriber struct {
