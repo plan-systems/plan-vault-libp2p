@@ -45,6 +45,7 @@ check:
 	@echo -n go mod tidy
 	@go mod tidy
 	@if (git status --porcelain | grep -Eq "go\.(mod|sum)"); then \
+		echo \
 		echo go.mod or go.sum needs updating; \
 		git --no-pager diff go.mod; \
 		git --no-pager diff go.sum; \
