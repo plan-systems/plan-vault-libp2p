@@ -165,6 +165,48 @@ func TestStore_Subscribe_ResetConcurrentAppends(t *testing.T) {
 
 }
 
+func TestStore_Restore_Channel(t *testing.T) {
+	t.Parallel()
+	require := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	cfg := DefaultConfig()
+	cfg.DB = cfg.DB.
+		WithDir("").                     // need to unset for in-memory
+		WithValueDir("").                // need to unset for in-memory
+		WithInMemory(true).              // no cleanup
+		WithLoggingLevel(badger.WARNING) // avoid test noise
+
+	store, err := New(ctx, cfg)
+	if err != nil {
+		t.Fatalf(err.Error())
+	}
+
+	channelID := helpers.ChannelURItoChannelID(t.Name())
+	channel, err := store.Channel(channelID)
+	if err != nil {
+		t.Fatalf(err.Error())
+	}
+
+	txnID, err := channel.Append([]byte("message 1"))
+	require.NoError(err)
+	require.Equal(uint64(1), txnID)
+
+	txnID, err = channel.Append([]byte("message 2"))
+	require.NoError(err)
+	require.Equal(uint64(2), txnID)
+
+	channel, err = store.Channel(channelID)
+	require.Equal(uint64(2), channel.txnID)
+
+	// TODO: we don't have a Channel shutdown mechanism separate from
+	// the Store
+	delete(store.channels, channelID)
+	channel, err = store.Channel(channelID)
+	require.Equal(uint64(2), channel.txnID)
+}
+
 func setup(t *testing.T) (*Channel, context.Context, func()) {
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -182,7 +224,10 @@ func setup(t *testing.T) (*Channel, context.Context, func()) {
 	}
 
 	channelID := helpers.ChannelURItoChannelID(t.Name())
-	channel := store.Channel(channelID)
+	channel, err := store.Channel(channelID)
+	if err != nil {
+		t.Fatalf(err.Error())
+	}
 
 	return channel, ctx, cancel
 }

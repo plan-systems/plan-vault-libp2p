@@ -111,7 +111,10 @@ func (v *VaultServer) open(stream Stream, req *pb.FeedReq) *pb.Msg {
 	}
 
 	channelID := helpers.ChannelURItoChannelID(uri)
-	channel := v.db.Channel(channelID)
+	channel, err := v.db.Channel(channelID)
+	if err != nil {
+		return errorResponse(reqID, pb.ErrCode_DatabaseError, err)
+	}
 	channel.Subscribe(context.TODO(), &stream, 0, 100)
 
 	resp := &pb.Msg{
@@ -153,8 +156,11 @@ func (v *VaultServer) append(req *pb.FeedReq) *pb.Msg {
 	}
 
 	channelID := helpers.ChannelURItoChannelID(uri)
-	channel := v.db.Channel(channelID)
-	_, err := channel.Append(body)
+	channel, err := v.db.Channel(channelID)
+	if err != nil {
+		return errorResponse(reqID, pb.ErrCode_DatabaseError, err)
+	}
+	_, err = channel.Append(body)
 	if err != nil {
 		return errorResponse(reqID, pb.ErrCode_DatabaseError, err)
 	}

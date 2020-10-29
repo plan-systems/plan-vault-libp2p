@@ -85,13 +85,13 @@ func (s *Store) close() {
 
 // Channel creates a new channel and starts its watcher, or returns
 // one we've registered previously.
-func (s *Store) Channel(id ChannelID) *Channel {
+func (s *Store) Channel(id ChannelID) (*Channel, error) {
 
 	s.lock.Lock()
 	defer s.lock.Unlock()
 
 	if channel, ok := s.channels[id]; ok {
-		return channel
+		return channel, nil
 	}
 
 	var b bytes.Buffer
@@ -105,12 +105,17 @@ func (s *Store) Channel(id ChannelID) *Channel {
 		id:     id,
 		prefix: prefix,
 		store:  s,
-		txnID:  0, // TODO: find latest from badger DB
 	}
+	txnID, err := channel.restoreTxnID()
+	if err != nil {
+		return nil, err
+	}
+	channel.txnID = txnID
+
 	channel.subscribers = map[helpers.UUID]*subscriber{}
 	s.channels[id] = channel
 	channel.watch()
-	return channel
+	return channel, nil
 }
 
 // Channel is an abstraction around the Store that tracks state for txnIDs
@@ -147,6 +152,38 @@ func (c *Channel) watch() {
 		}, c.prefix)
 }
 
+// restoreTxnID is used to get the last txnID after a Channel restart
+// or after the Vault is restarted. This is not safe to use outside of
+// the Store.Channel method
+func (c *Channel) restoreTxnID() (uint64, error) {
+	var txnID uint64
+	err := c.store.db.View(func(txn *badger.Txn) error {
+		opts := badger.DefaultIteratorOptions
+		opts.Reverse = true
+		opts.PrefetchValues = false
+
+		it := txn.NewIterator(opts)
+		var err error
+		defer it.Close()
+
+		// this check looks redundant and fussy but is definitely
+		// required for correct reverse iteration in badger, otherwise
+		// you get no results (see their FAQ)
+		for it.Rewind(); it.Valid(); it.Next() {
+			if !it.ValidForPrefix(c.prefix) {
+				continue
+			}
+			item := it.Item()
+			k := item.Key()
+			txnID = binary.BigEndian.Uint64(k[64:])
+			return err
+		}
+		return nil // new channel
+	})
+	return txnID, err
+
+}
+
 // Append creates a new entry and returns the storage txnID for that
 // entry.
 func (c *Channel) Append(entry []byte) (uint64, error) {
@@ -171,7 +208,7 @@ func (c *Channel) nextKey() (StoreKey, uint64) {
 func (c *Channel) keyFor(txnID uint64) StoreKey {
 	k := make([]byte, 72)
 	copy(k, c.prefix)
-	binary.BigEndian.PutUint64(k[64:], uint64(txnID))
+	binary.BigEndian.PutUint64(k[64:], txnID)
 	return k
 }
 
@@ -238,6 +275,8 @@ type subscriber struct {
 	resetRx chan []uint64
 }
 
+// TODO: once a channel has no subscribers, we should close it so
+// that we don't have to run its broadcaster
 func (sub *subscriber) unsubscribe() {
 	sub.channel.sLock.Lock()
 	defer sub.channel.sLock.Unlock()
