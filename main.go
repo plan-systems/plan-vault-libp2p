@@ -14,7 +14,8 @@ func main() {
 	flag.Parse()
 	ctx := context.Background()
 
-	db, err := store.New(ctx)
+	cfg := store.DefaultConfig()
+	db, err := store.New(ctx, cfg)
 	if err != nil {
 		log.Fatal(err)
 	}
