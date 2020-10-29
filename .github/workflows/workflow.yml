@@ -8,7 +8,8 @@ on:
   push:
     paths-ignore:
       - "*.md"
-    branches: [ $default-branch ]
+    branches:
+      - main
 
 jobs:
 
