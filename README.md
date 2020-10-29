@@ -21,9 +21,10 @@ Requires golang 1.15. To build: `make build`
 * `make test` will run tests.
 * `make check` will do linting and static analysis.
 
-Continuous integration will be set up shortly to enforce that all
-commits pass `make test` and `make check`. The repo also includes a
-self-describing Makefile:
+Continuous integration via [Github
+actions](https://github.com/plan-systems/plan-vault-libp2p/actions)
+will enforce that all commits pass `make test` and `make check`. The
+repo also includes a self-describing Makefile:
 
 ```
 $ make help
