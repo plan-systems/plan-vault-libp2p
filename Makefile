@@ -26,10 +26,6 @@ bin/vault: $(GOFILES)
 # ----------------------------------------
 # test
 
-## run linting and static analysis
-check:
-	gofmt -w -s main.go
-
 ## build and run the vault binary
 run: build
 	./bin/vault
@@ -37,6 +33,23 @@ run: build
 ## run unit tests
 test:
 	go test -v ./... -count=1
+
+## run linting and static analysis
+check:
+	@echo -n gofmt
+	@find . -type f -name '*.go' ! -name '*.pb.go' -exec gofmt -w -s {} \;
+	@echo ' ......... ok!'
+	@echo -n go vet
+	@go vet ./...
+	@echo ' ........ ok!'
+	@echo -n go mod tidy
+	@go mod tidy
+	@if (git status --porcelain | grep -Eq "go\.(mod|sum)"); then \
+		echo go.mod or go.sum needs updating; \
+		git --no-pager diff go.mod; \
+		git --no-pager diff go.sum; \
+		exit 1; fi
+	@echo ' ... ok!'
 
 # ----------------------------------------
 # tooling
