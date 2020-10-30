@@ -25,8 +25,8 @@ jobs:
       - name: "golang pkg cache"
         uses: "actions/cache@v2"
         with:
-          path: "~/go/pkg"
-          key: "pkg-${{hashFiles('go.mod')}}-${{hashFiles('go.sum')}}"
+          path: "~/go/pkg/mod"
+          key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
 
       - name: "linting and static analysis"
         run: "make check"
