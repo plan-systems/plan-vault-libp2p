@@ -115,7 +115,8 @@ func (v *VaultServer) open(stream Stream, req *pb.FeedReq) *pb.Msg {
 	if err != nil {
 		return errorResponse(reqID, pb.ErrCode_DatabaseError, err)
 	}
-	channel.Subscribe(context.TODO(), &stream, 0, 100)
+	start := newStreamStart(channel, req.GetOpenFeed())
+	channel.Subscribe(context.TODO(), &stream, start)
 
 	resp := &pb.Msg{
 		Op:    pb.MsgOp_ReqComplete,
@@ -125,6 +126,41 @@ func (v *VaultServer) open(stream Stream, req *pb.FeedReq) *pb.Msg {
 		},
 	}
 	return resp
+
+}
+
+func newStreamStart(channel *store.Channel, req *pb.OpenFeedReq) *store.StreamStart {
+
+	mode := req.GetStreamMode()
+	start := req.GetSeekEntryID() // TODO: we need to convert this to a Store txnID?
+
+	switch mode {
+	case pb.StreamMode_DontStream:
+		return nil
+	case pb.StreamMode_FromGenesis:
+		start = channel.FirstKey()
+	case pb.StreamMode_AtEntry:
+		// no-op
+	case pb.StreamMode_AfterEntry:
+		start = channel.KeyAfter(start)
+	case pb.StreamMode_AfterHead:
+		start = channel.LastKey()
+	}
+
+	var max uint64
+	i := req.GetMaxEntriesToSend()
+	if i >= 0 { // avoid overflow from int32
+		max = uint64(i)
+	}
+	if max == 0 {
+		max = store.Tail
+	}
+
+	return &store.StreamStart{
+		Start:   start,
+		Max:     max,
+		IdsOnly: req.GetSendEntryIDsOnly(),
+	}
 
 }
 

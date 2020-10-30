@@ -186,16 +186,15 @@ func (c *Channel) restoreTxnID() (uint64, error) {
 
 // Append creates a new entry and returns the storage txnID for that
 // entry.
-func (c *Channel) Append(entry []byte) (uint64, error) {
+func (c *Channel) Append(entry []byte) (StoreKey, error) {
 	var key StoreKey
-	var txnID uint64
 	err := c.store.db.Update(func(txn *badger.Txn) error {
-		key, txnID = c.nextKey()
+		key, _ = c.nextKey()
 		e := badger.NewEntry(key, entry)
 		err := txn.SetEntry(e)
 		return err
 	})
-	return txnID, err
+	return key, err
 }
 
 func (c *Channel) nextKey() (StoreKey, uint64) {
@@ -203,6 +202,26 @@ func (c *Channel) nextKey() (StoreKey, uint64) {
 	c.txnID++
 	c.lock.Unlock()
 	return c.keyFor(c.txnID), c.txnID
+}
+
+// LastKey returns the head key of the channel
+func (c *Channel) LastKey() StoreKey {
+	c.lock.Lock()
+	defer c.lock.Unlock()
+	return c.keyFor(c.txnID)
+}
+
+// KeyAfter returns the next key after the argument for this channel
+// without advancing the internal transaction ID
+func (c *Channel) KeyAfter(k StoreKey) StoreKey {
+	txnID := binary.BigEndian.Uint64(k[64:])
+	txnID++
+	return c.keyFor(txnID)
+}
+
+// FirstKey returns the genesis key for the channel
+func (c *Channel) FirstKey() StoreKey {
+	return c.keyFor(0)
 }
 
 func (c *Channel) keyFor(txnID uint64) StoreKey {
@@ -233,14 +252,14 @@ func (c *Channel) get(txnID uint64) ([]byte, error) {
 
 // Subscribe sets up a subscription that will fire the target's Send
 // callback with each entry between the `start` and `max` IDs.
-func (c *Channel) Subscribe(pctx context.Context, target SubscriptionTarget, start, max uint64) {
+func (c *Channel) Subscribe(pctx context.Context, target SubscriptionTarget, start *StreamStart) {
 	c.sLock.Lock()
 	defer c.sLock.Unlock()
 
 	id := target.ID()
 
 	if oldSub, ok := c.subscribers[id]; ok {
-		oldSub.reset(start, max)
+		oldSub.reset(start)
 		return
 	}
 
@@ -252,11 +271,11 @@ func (c *Channel) Subscribe(pctx context.Context, target SubscriptionTarget, sta
 		channel: c,
 		target:  target,
 		rx:      make(chan struct{}),
-		resetRx: make(chan []uint64),
+		resetRx: make(chan *StreamStart),
 	}
 
 	c.subscribers[sub.id] = sub
-	go sub.read(start, max)
+	go sub.read(start)
 }
 
 type SubscriptionTarget interface {
@@ -272,7 +291,7 @@ type subscriber struct {
 	channel *Channel
 	target  SubscriptionTarget
 	rx      chan struct{}
-	resetRx chan []uint64
+	resetRx chan *StreamStart
 }
 
 // TODO: once a channel has no subscribers, we should close it so
@@ -287,8 +306,14 @@ func (s *subscriber) notify() {
 	s.rx <- struct{}{}
 }
 
-func (s *subscriber) reset(start, max uint64) {
-	s.resetRx <- []uint64{start, max}
+type StreamStart struct {
+	Start   []byte
+	Max     uint64
+	IdsOnly bool
+}
+
+func (s *subscriber) reset(r *StreamStart) {
+	s.resetRx <- r
 }
 
 // read drives the subscription.
@@ -305,12 +330,13 @@ func (s *subscriber) reset(start, max uint64) {
 // This coaleces multiple update notifications that happen within a
 // single iterator, but also lets us block if we're not dirty so that
 // we're not continuously iterating if there's no incoming writes.
-func (sub *subscriber) read(start, max uint64) error {
+func (sub *subscriber) read(start *StreamStart) error {
 	defer sub.unsubscribe()
 	var count uint64
 	var dirty bool
 	var lastSeen []byte
-	key := sub.channel.keyFor(start)
+	key := start.Start
+	max := start.Max
 
 	iterate := func() error {
 		return sub.channel.store.db.View(func(txn *badger.Txn) error {
@@ -333,8 +359,8 @@ func (sub *subscriber) read(start, max uint64) error {
 					dirty = true
 				case reset := <-sub.resetRx:
 					dirty = true
-					key = sub.channel.keyFor(reset[0])
-					max = reset[1]
+					key = reset.Start
+					max = reset.Max
 					return nil
 				default:
 					if !it.Valid() {

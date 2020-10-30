@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"encoding/binary"
 	"fmt"
 	"sync"
 	"testing"
@@ -21,15 +22,15 @@ func TestStore_Subscribe_FromEmpty(t *testing.T) {
 
 	sub := NewMockSubscriber(ctx)
 	sub.expect(2)
-	channel.Subscribe(ctx, sub, 0, Tail)
+	channel.Subscribe(ctx, sub, &StreamStart{channel.FirstKey(), Tail, false})
 
 	txnID, err := channel.Append([]byte("message 1"))
 	require.NoError(err)
-	require.Equal(uint64(1), txnID)
+	require.Equal(uint64(1), keyTxn(txnID))
 
 	txnID, err = channel.Append([]byte("message 2"))
 	require.NoError(err)
-	require.Equal(uint64(2), txnID)
+	require.Equal(uint64(2), keyTxn(txnID))
 
 	sub.wait()
 	require.Equal(2, sub.count)
@@ -43,19 +44,19 @@ func TestStore_Subscribe_DetectNewWrites(t *testing.T) {
 
 	txnID1, err := channel.Append([]byte("message 1"))
 	require.NoError(err)
-	require.Equal(uint64(1), txnID1)
+	require.Equal(uint64(1), keyTxn(txnID1))
 
 	txnID2, err := channel.Append([]byte("message 2"))
 	require.NoError(err)
-	require.Equal(uint64(2), txnID2)
+	require.Equal(uint64(2), keyTxn(txnID2))
 
 	txnID3, err := channel.Append([]byte("message 3"))
 	require.NoError(err)
-	require.Equal(uint64(3), txnID3)
+	require.Equal(uint64(3), keyTxn(txnID3))
 
 	sub := NewMockSubscriber(ctx)
 	sub.expect(2)
-	channel.Subscribe(ctx, sub, txnID2, Tail)
+	channel.Subscribe(ctx, sub, &StreamStart{txnID2, Tail, false})
 	sub.wait()
 
 	require.Equal(2, sub.count)
@@ -85,31 +86,31 @@ func TestStore_Subscribe_Reset(t *testing.T) {
 
 	txnID1, err := channel.Append([]byte("message 1"))
 	require.NoError(err)
-	require.Equal(uint64(1), txnID1)
+	require.Equal(uint64(1), keyTxn(txnID1))
 
 	txnID2, err := channel.Append([]byte("message 2"))
 	require.NoError(err)
-	require.Equal(uint64(2), txnID2)
+	require.Equal(uint64(2), keyTxn(txnID2))
 
 	txnID3, err := channel.Append([]byte("message 3"))
 	require.NoError(err)
-	require.Equal(uint64(3), txnID3)
+	require.Equal(uint64(3), keyTxn(txnID3))
 
 	sub := NewMockSubscriber(ctx)
 	sub.expect(2)
-	channel.Subscribe(ctx, sub, txnID2, Tail)
+	channel.Subscribe(ctx, sub, &StreamStart{txnID2, Tail, false})
 	sub.wait()
 
 	require.Equal(2, sub.count)
 
 	sub.expect(3)
-	channel.Subscribe(ctx, sub, txnID1, Tail)
+	channel.Subscribe(ctx, sub, &StreamStart{txnID1, Tail, false})
 	sub.wait()
 
 	require.Equal(5, sub.count)
 
 	sub.expect(2)
-	channel.Subscribe(ctx, sub, txnID1, 2)
+	channel.Subscribe(ctx, sub, &StreamStart{txnID1, 2, false})
 	sub.wait()
 	require.Equal(7, sub.count)
 
@@ -126,19 +127,19 @@ func TestStore_Subscribe_ResetConcurrentAppends(t *testing.T) {
 
 	txnID1, err := channel.Append([]byte("message 1"))
 	require.NoError(err)
-	require.Equal(uint64(1), txnID1)
+	require.Equal(uint64(1), keyTxn(txnID1))
 
 	txnID2, err := channel.Append([]byte("message 2"))
 	require.NoError(err)
-	require.Equal(uint64(2), txnID2)
+	require.Equal(uint64(2), keyTxn(txnID2))
 
 	txnID3, err := channel.Append([]byte("message 3"))
 	require.NoError(err)
-	require.Equal(uint64(3), txnID3)
+	require.Equal(uint64(3), keyTxn(txnID3))
 
 	sub := NewMockSubscriber(ctx)
 	sub.expect(2)
-	channel.Subscribe(ctx, sub, txnID2, Tail)
+	channel.Subscribe(ctx, sub, &StreamStart{txnID2, Tail, false})
 	sub.wait()
 
 	require.Equal(2, sub.count)
@@ -148,7 +149,7 @@ func TestStore_Subscribe_ResetConcurrentAppends(t *testing.T) {
 	// we're now resetting the subscription while a concurrent write
 	// is coming.  we can't make any guarantees about the order of
 	// events here and we'll get the last message repeated.
-	channel.Subscribe(ctx, sub, txnID1, Tail)
+	channel.Subscribe(ctx, sub, &StreamStart{txnID1, Tail, false})
 	_, err = channel.Append([]byte("message 4"))
 	require.NoError(err)
 	sub.wait()
@@ -185,11 +186,11 @@ func TestStore_Restore_Channel(t *testing.T) {
 
 	txnID, err := channel.Append([]byte("message 1"))
 	require.NoError(err)
-	require.Equal(uint64(1), txnID)
+	require.Equal(uint64(1), keyTxn(txnID))
 
 	txnID, err = channel.Append([]byte("message 2"))
 	require.NoError(err)
-	require.Equal(uint64(2), txnID)
+	require.Equal(uint64(2), keyTxn(txnID))
 
 	channel, err = store.Channel(channelID)
 	require.Equal(uint64(2), channel.txnID)
@@ -227,6 +228,10 @@ func testConfig() Config {
 		WithInMemory(true).              // no cleanup
 		WithLoggingLevel(badger.WARNING) // avoid test noise
 	return cfg
+}
+
+func keyTxn(k []byte) uint64 {
+	return binary.BigEndian.Uint64(k[64:])
 }
 
 type MockSubscriber struct {
