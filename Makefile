@@ -32,7 +32,12 @@ run: build
 
 ## run unit tests
 test:
-	go test -v ./... -count=1
+	go test -v -cover ./... -count=1
+
+## run units tests and show coverage profile
+cover:
+	go test -v -cover -coverprofile=./cover.out ./... -count=1
+	go tool cover -html=./cover.out
 
 ## run linting and static analysis
 check:
