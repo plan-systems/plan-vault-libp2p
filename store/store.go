@@ -189,7 +189,7 @@ func (c *Channel) restoreTxnID() (uint64, error) {
 func (c *Channel) Append(entry []byte) (StoreKey, error) {
 	var key StoreKey
 	err := c.store.db.Update(func(txn *badger.Txn) error {
-		key, _ = c.nextKey()
+		key, _ = c.NextKey()
 		e := badger.NewEntry(key, entry)
 		err := txn.SetEntry(e)
 		return err
@@ -197,18 +197,19 @@ func (c *Channel) Append(entry []byte) (StoreKey, error) {
 	return key, err
 }
 
-func (c *Channel) nextKey() (StoreKey, uint64) {
+// NextKey increments the internal txnID and returns the key for it
+func (c *Channel) NextKey() (StoreKey, uint64) {
 	c.lock.Lock()
 	c.txnID++
 	c.lock.Unlock()
-	return c.keyFor(c.txnID), c.txnID
+	return c.KeyFor(c.txnID), c.txnID
 }
 
 // LastKey returns the head key of the channel
 func (c *Channel) LastKey() StoreKey {
 	c.lock.Lock()
 	defer c.lock.Unlock()
-	return c.keyFor(c.txnID)
+	return c.KeyFor(c.txnID)
 }
 
 // KeyAfter returns the next key after the argument for this channel
@@ -216,15 +217,16 @@ func (c *Channel) LastKey() StoreKey {
 func (c *Channel) KeyAfter(k StoreKey) StoreKey {
 	txnID := binary.BigEndian.Uint64(k[64:])
 	txnID++
-	return c.keyFor(txnID)
+	return c.KeyFor(txnID)
 }
 
 // FirstKey returns the genesis key for the channel
 func (c *Channel) FirstKey() StoreKey {
-	return c.keyFor(0)
+	return c.KeyFor(0)
 }
 
-func (c *Channel) keyFor(txnID uint64) StoreKey {
+// KeyFor generates a key for a specific txnID
+func (c *Channel) KeyFor(txnID uint64) StoreKey {
 	k := make([]byte, 72)
 	copy(k, c.prefix)
 	binary.BigEndian.PutUint64(k[64:], txnID)
@@ -233,8 +235,7 @@ func (c *Channel) keyFor(txnID uint64) StoreKey {
 
 // get accesses a key directly, implemented mostly for debugging and
 // testing purposes
-func (c *Channel) get(txnID uint64) ([]byte, error) {
-	key := c.keyFor(txnID)
+func (c *Channel) Get(key StoreKey) ([]byte, error) {
 	var result []byte
 	err := c.store.db.View(func(txn *badger.Txn) error {
 		item, err := txn.Get(key)
@@ -331,6 +332,9 @@ func (s *subscriber) reset(r *StreamStart) {
 // single iterator, but also lets us block if we're not dirty so that
 // we're not continuously iterating if there's no incoming writes.
 func (sub *subscriber) read(start *StreamStart) error {
+	if start == nil {
+		return nil
+	}
 	defer sub.unsubscribe()
 	var count uint64
 	var dirty bool
@@ -358,6 +362,9 @@ func (sub *subscriber) read(start *StreamStart) error {
 				case <-sub.rx:
 					dirty = true
 				case reset := <-sub.resetRx:
+					if reset == nil {
+						return nil
+					}
 					dirty = true
 					key = reset.Start
 					max = reset.Max
@@ -378,6 +385,8 @@ func (sub *subscriber) read(start *StreamStart) error {
 						continue
 					}
 					err := item.Value(func(v []byte) error {
+						// TODO: handle keys-only case
+						// TODO: we need to copy any values we send
 						sub.target.Send(v)
 						key = item.Key()
 						lastSeen = key

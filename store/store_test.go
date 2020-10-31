@@ -73,7 +73,7 @@ func TestStore_Subscribe_DetectNewWrites(t *testing.T) {
 
 	require.Equal(4, sub.count)
 
-	msg, err := channel.get(uint64(3))
+	msg, err := channel.Get(channel.KeyFor(uint64(3)))
 	require.NoError(err)
 	require.Equal("message 3", string(msg))
 }
@@ -114,7 +114,7 @@ func TestStore_Subscribe_Reset(t *testing.T) {
 	sub.wait()
 	require.Equal(7, sub.count)
 
-	msg, err := channel.get(uint64(3))
+	msg, err := channel.Get(channel.KeyFor(uint64(3)))
 	require.NoError(err)
 	require.Equal("message 3", string(msg))
 }
@@ -156,11 +156,11 @@ func TestStore_Subscribe_ResetConcurrentAppends(t *testing.T) {
 
 	require.Equal(7, sub.count)
 
-	msg, err := channel.get(uint64(4))
+	msg, err := channel.Get(channel.KeyFor(uint64(4)))
 	require.NoError(err)
 	require.Equal("message 4", string(msg))
 
-	_, err = channel.get(uint64(5))
+	_, err = channel.Get(channel.KeyFor(uint64(5)))
 	require.Error(err)
 	require.EqualError(err, badger.ErrKeyNotFound.Error())
 

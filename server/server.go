@@ -65,6 +65,13 @@ func (v *VaultServer) VaultSession(stream pb.VaultGrpc_VaultSessionServer) error
 			// TODO: what are we supposed to be doing here?
 			return err
 		}
+		if req == nil {
+			// TODO: if our ReqOp zero value is an error value,
+			// we can avoid this check
+			err = stream.Send(errorResponse(0, pb.ErrCode_InvalidRequest,
+				fmt.Errorf("invalid request")))
+			continue
+		}
 		switch req.GetReqOp() {
 		case pb.ReqOp_ChannelGenesis:
 			err = stream.Send(v.new(req))
@@ -152,7 +159,7 @@ func newStreamStart(channel *store.Channel, req *pb.OpenFeedReq) *store.StreamSt
 	if i >= 0 { // avoid overflow from int32
 		max = uint64(i)
 	}
-	if max == 0 {
+	if max <= 0 {
 		max = store.Tail
 	}
 
@@ -169,7 +176,7 @@ type Stream struct {
 	id helpers.UUID
 }
 
-func (s *Stream) Send([]byte)      {}
+func (s *Stream) Send(msg []byte)  {}
 func (s *Stream) Done()            {}
 func (s *Stream) ID() helpers.UUID { return s.id }
 
@@ -189,26 +196,24 @@ func (v *VaultServer) append(req *pb.FeedReq) *pb.Msg {
 	if len(body) == 0 || len(body) > maxBodySize {
 		return errorResponse(reqID, pb.ErrCode_InvalidRequest,
 			fmt.Errorf("invalid entry body"))
-	}
 
+	}
 	channelID := helpers.ChannelURItoChannelID(uri)
 	channel, err := v.db.Channel(channelID)
 	if err != nil {
 		return errorResponse(reqID, pb.ErrCode_DatabaseError, err)
 	}
-	_, err = channel.Append(body)
+	key, err := channel.Append(body)
 	if err != nil {
 		return errorResponse(reqID, pb.ErrCode_DatabaseError, err)
 	}
 
-	// TODO: figure out if we need to fill out anything more than this
 	resp := &pb.Msg{
-		Op:    pb.MsgOp_ReqComplete,
-		ReqID: reqID,
-		Status: &pb.ReqStatus{
-			Code: pb.StatusCode_Working,
-			// EntryID: txnID,
-		},
+		Op:          pb.MsgOp_ReqComplete,
+		ReqID:       reqID,
+		EntryHeader: &pb.EntryHeader{EntryID: key},
+		// TODO: we should have a "complete" status
+		Status: &pb.ReqStatus{Code: pb.StatusCode_Working},
 	}
 	return resp
 }
