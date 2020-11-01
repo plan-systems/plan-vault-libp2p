@@ -26,24 +26,34 @@ Design notes on schema:
   usability issues (not to mention spawning large numbers of
   goroutines), so we want to use a single table space.
 
-* We want to be able to temporally sort all the entries from a given
-  peer for a given channel, but we can't enforce ordering between
-  peers (at this layer).
+* EntryIDs are 30 bytes, sortable by timestamp and including a random
+  component sufficient to prevent collisions.
 
-* The PLAN entry ID is a hash of the content, so we can't sort or
-  iterate with that. The Store will keep a monotonically increasing
-  txn ID on a per-channel per-peer basis to use as the range key. This
-  also gives us the opportunity to batch-up multiple small entries
-  into a single storage txn (TODO)
+* Because peers can come and go, we may get "historical" entries from
+  those peers from a large time window in the past (configurable by
+  the community but expected to be on the order of days and weeks, not
+  seconds).
 
-* Store key schema (72 bytes):
-  * bytes 00-31: sha256(channel ID)
-  * bytes 32-62: libp2p peer ID, which is the sha256 of the peer's public key
-  * bytes 63-71: txn ID (monotonically increasing int64)
+* Therefore, in addition to the Entries keyspace, we'll have an
+  ArrivalIndex keyspace (with zero-values) which gives us ordered keys
+  for when entries were received *by this peer*. A client that comes
+  online can use its last ArrivalIndex to ask the vault for the keys
+  that it missed while disconnected.
 
-* Store value schema:
-  * Header (?)
-  * Client-encrypted body
+* The ArrivalIndex can be "aged out"
+
+* Entry key schema (63 bytes):
+  * bytes 00:31 channel ID (sha256)
+  * byte  32    table space (Entries) + reserved control bits
+  * bytes 34:63 entry ID
+
+* ArrivalIndex key schema (68 bytes):
+  * bytes 00:31 channel ID (sha256)
+  * byte  32    table space (ArrivalIndex) + reserved control bits
+  * bytes 33:38 timestamp in unix seconds (UTC, big endian)
+  * bytes 39:68 entry ID
+
+* Entry value schema is a protos.Msg w/ Op and ReqID left unset
 
 */
 
