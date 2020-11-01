@@ -14,7 +14,13 @@ import (
 	libp2ptls "github.com/libp2p/go-libp2p-tls"
 )
 
-func New(ctx context.Context) (*host.Host, error) {
+type Node struct {
+	host   *host.Host
+	pubsub *pubsub.PubSub
+	ctx    context.Context
+}
+
+func New(ctx context.Context) (*Node, error) {
 
 	// TODO: store these on disk somewheres
 	priv, _, err := crypto.GenerateKeyPair(
@@ -47,7 +53,7 @@ func New(ctx context.Context) (*host.Host, error) {
 	}
 
 	// TODO: we need to actually do something with this pubsub
-	_, err = pubsub.NewGossipSub(ctx, h)
+	p, err := pubsub.NewGossipSub(ctx, h)
 	if err != nil {
 		panic(err)
 	}
@@ -58,5 +64,9 @@ func New(ctx context.Context) (*host.Host, error) {
 		panic(err)
 	}
 
-	return &h, nil
+	return &Node{
+		host:   &h,
+		pubsub: p,
+	}, nil
+
 }

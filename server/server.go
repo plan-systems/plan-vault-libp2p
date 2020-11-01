@@ -7,11 +7,11 @@ import (
 	"log"
 	"net"
 
-	"github.com/libp2p/go-libp2p-core/host"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
 
 	"github.com/plan-systems/plan-vault-libp2p/helpers"
+	"github.com/plan-systems/plan-vault-libp2p/p2p"
 	pb "github.com/plan-systems/plan-vault-libp2p/protos"
 	"github.com/plan-systems/plan-vault-libp2p/store"
 )
@@ -19,7 +19,7 @@ import (
 // TODO: figure out how we want to tune this
 const maxBodySize = 10000000
 
-func Run(ctx context.Context, nodeHost *host.Host, db *store.Store) {
+func Run(ctx context.Context, node *p2p.Node, db *store.Store) {
 	listener, err := net.Listen("tcp", fmt.Sprintf("%s:%d", *grpcAddr, *grpcPort))
 	if err != nil {
 		log.Fatalf("failed to set up listener: %v", err)
@@ -37,7 +37,7 @@ func Run(ctx context.Context, nodeHost *host.Host, db *store.Store) {
 	// TODO: look thru the options to thread a context thru here
 	grpcServer := grpc.NewServer(opts...)
 
-	vaultSrv := &VaultServer{nodeHost: nodeHost, db: db}
+	vaultSrv := &VaultServer{node: node, db: db}
 	pb.RegisterVaultGrpcServer(grpcServer, vaultSrv)
 	grpcServer.Serve(listener)
 }
@@ -45,8 +45,8 @@ func Run(ctx context.Context, nodeHost *host.Host, db *store.Store) {
 type VaultServer struct {
 	pb.UnimplementedVaultGrpcServer
 
-	nodeHost *host.Host
-	db       *store.Store
+	node *p2p.Node
+	db   *store.Store
 }
 
 func (v *VaultServer) VaultSession(stream pb.VaultGrpc_VaultSessionServer) error {
