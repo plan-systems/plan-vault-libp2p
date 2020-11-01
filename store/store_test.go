@@ -6,12 +6,42 @@ import (
 	"fmt"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/dgraph-io/badger/v2"
 	"github.com/stretchr/testify/require"
 
 	"github.com/plan-systems/plan-vault-libp2p/helpers"
+	pb "github.com/plan-systems/plan-vault-libp2p/protos"
 )
+
+func TestStore_StreamOptFlags(t *testing.T) {
+	t.Parallel()
+	require := require.New(t)
+
+	f := OptKeysOnly
+	require.True(f.Has(OptKeysOnly))
+	require.False(f.Has(OptSkipFirst))
+
+	f = OptSkipFirst | OptNone
+	require.True(f.Has(OptSkipFirst))
+	require.Equal(OptSkipFirst, f)
+
+	f = OptSkipFirst | OptKeysOnly
+	require.True(f.Has(OptSkipFirst))
+	require.True(f.Has(OptKeysOnly))
+
+	f = OptSkipFirst | OptKeysOnly | OptFromHead
+	require.True(f.Has(OptSkipFirst))
+	require.True(f.Has(OptKeysOnly))
+	require.True(f.Has(OptFromHead))
+
+	f = OptSkipFirst | OptKeysOnly | OptFromHead | OptFromGenesis
+	require.True(f.Has(OptSkipFirst))
+	require.True(f.Has(OptKeysOnly))
+	require.True(f.Has(OptFromHead))
+	require.True(f.Has(OptFromGenesis))
+}
 
 func TestStore_Subscribe_FromEmpty(t *testing.T) {
 	t.Parallel()
@@ -22,18 +52,69 @@ func TestStore_Subscribe_FromEmpty(t *testing.T) {
 
 	sub := NewMockSubscriber(ctx)
 	sub.expect(2)
-	channel.Subscribe(ctx, sub, &StreamStart{channel.FirstKey(), Tail, false})
+	channel.Subscribe(ctx, sub,
+		&StreamOpts{Seek: channel.firstKey(), Max: Tail, Flags: OptNone})
 
-	txnID, err := channel.Append([]byte("message 1"))
+	_, err := channel.Append(helpers.NewEntry("message 1"))
 	require.NoError(err)
-	require.Equal(uint64(1), keyTxn(txnID))
 
-	txnID, err = channel.Append([]byte("message 2"))
+	ent2 := helpers.NewEntry("message 2")
+	idx2, err := channel.Append(ent2)
 	require.NoError(err)
-	require.Equal(uint64(2), keyTxn(txnID))
 
 	sub.wait()
-	require.Equal(2, sub.count)
+	require.Equal(2, sub.count())
+
+	// the last item the subscriber got...
+	require.Equal(id(ent2), id(sub.received[1]))
+	require.Equal("message 2", string(sub.received[1].GetBody()))
+
+	// which matches what we wrote for the index...
+	rxMsg, err := channel.Get(channel.entryKeyFromIndex(idx2))
+	require.NoError(err)
+	require.Equal("message 2", string(rxMsg.GetBody()))
+
+	// which matches what we wrote for the key
+	rxMsg, err = channel.Get(channel.EntryKey(id(ent2)))
+	require.NoError(err)
+	require.Equal("message 2", string(rxMsg.GetBody()))
+}
+
+func TestStore_Subscribe_AfterHead(t *testing.T) {
+	t.Parallel()
+	require := require.New(t)
+
+	channel, ctx, cancel := setup(t)
+	defer cancel()
+
+	ent1 := helpers.NewEntry("message 1")
+	_, err := channel.Append(ent1)
+	require.NoError(err)
+
+	ent2 := helpers.NewEntry("message 2")
+	_, err = channel.Append(ent2)
+	require.NoError(err)
+
+	sub := NewMockSubscriber(ctx)
+	sub.expect(1)
+	require.NoError(err)
+	channel.Subscribe(ctx, sub,
+		&StreamOpts{Seek: []byte{}, Max: Tail, Flags: OptFromHead | OptSkipFirst})
+
+	// if we skip first, the new append will race with setting up the
+	// subscription.  wait until we know we've done that
+	time.Sleep(1 * time.Second)
+
+	ent3 := helpers.NewEntry("message 3")
+	_, err = channel.Append(ent3)
+	require.NoError(err)
+
+	sub.wait()
+	require.Equal(1, sub.count())
+
+	// the only item the subscriber got...
+	require.Equal(id(ent3), id(sub.received[0]))
+	require.Equal("message 3", string(sub.received[0].GetBody()))
 }
 
 func TestStore_Subscribe_DetectNewWrites(t *testing.T) {
@@ -42,40 +123,50 @@ func TestStore_Subscribe_DetectNewWrites(t *testing.T) {
 	channel, ctx, cancel := setup(t)
 	defer cancel()
 
-	txnID1, err := channel.Append([]byte("message 1"))
+	_, err := channel.Append(helpers.NewEntry("message 1"))
 	require.NoError(err)
-	require.Equal(uint64(1), keyTxn(txnID1))
 
-	txnID2, err := channel.Append([]byte("message 2"))
+	ent2 := helpers.NewEntry("message 2")
+	_, err = channel.Append(ent2)
 	require.NoError(err)
-	require.Equal(uint64(2), keyTxn(txnID2))
 
-	txnID3, err := channel.Append([]byte("message 3"))
+	ent3 := helpers.NewEntry("message 3")
+	idx3, err := channel.Append(ent3)
 	require.NoError(err)
-	require.Equal(uint64(3), keyTxn(txnID3))
 
 	sub := NewMockSubscriber(ctx)
 	sub.expect(2)
-	channel.Subscribe(ctx, sub, &StreamStart{txnID2, Tail, false})
+	channel.Subscribe(ctx, sub,
+		&StreamOpts{Seek: channel.EntryKey(id(ent2)), Max: Tail, Flags: OptNone})
+
+	// the subscriber should get exactly 2...
 	sub.wait()
+	require.Equal(2, sub.count())
 
-	require.Equal(2, sub.count)
-
+	// send 2 more...
 	sub.expect(2)
 
-	_, err = channel.Append([]byte("message 4"))
+	ent4 := helpers.NewEntry("message 4")
+	_, err = channel.Append(ent4)
 	require.NoError(err)
 
-	_, err = channel.Append([]byte("message 5"))
+	ent5 := helpers.NewEntry("message 5")
+	_, err = channel.Append(ent5)
 	require.NoError(err)
 
 	sub.wait()
+	require.Equal(4, sub.count())
 
-	require.Equal(4, sub.count)
-
-	msg, err := channel.Get(channel.KeyFor(uint64(3)))
+	msg, err := channel.Get(channel.entryKeyFromIndex(idx3))
 	require.NoError(err)
-	require.Equal("message 3", string(msg))
+	require.Equal("message 3", string(msg.GetBody()))
+
+	// we should get the writes in the order they were written
+	require.Equal(id(ent2), id(sub.received[0]))
+	require.Equal(id(ent3), id(sub.received[1]))
+	require.Equal(id(ent4), id(sub.received[2]))
+	require.Equal(id(ent5), id(sub.received[3]))
+
 }
 
 func TestStore_Subscribe_Reset(t *testing.T) {
@@ -84,39 +175,54 @@ func TestStore_Subscribe_Reset(t *testing.T) {
 	channel, ctx, cancel := setup(t)
 	defer cancel()
 
-	txnID1, err := channel.Append([]byte("message 1"))
+	ent1 := helpers.NewEntry("message 1")
+	idx1, err := channel.Append(ent1)
 	require.NoError(err)
-	require.Equal(uint64(1), keyTxn(txnID1))
 
-	txnID2, err := channel.Append([]byte("message 2"))
+	ent2 := helpers.NewEntry("message 2")
+	idx2, err := channel.Append(ent2)
 	require.NoError(err)
-	require.Equal(uint64(2), keyTxn(txnID2))
 
-	txnID3, err := channel.Append([]byte("message 3"))
+	ent3 := helpers.NewEntry("message 3")
+	idx3, err := channel.Append(ent3)
 	require.NoError(err)
-	require.Equal(uint64(3), keyTxn(txnID3))
 
 	sub := NewMockSubscriber(ctx)
 	sub.expect(2)
-	channel.Subscribe(ctx, sub, &StreamStart{txnID2, Tail, false})
+	channel.Subscribe(ctx, sub,
+		&StreamOpts{Seek: channel.entryKeyFromIndex(idx2), Max: Tail, Flags: OptNone})
 	sub.wait()
 
-	require.Equal(2, sub.count)
+	require.Equal(2, sub.count())
 
 	sub.expect(3)
-	channel.Subscribe(ctx, sub, &StreamStart{txnID1, Tail, false})
+	channel.Subscribe(ctx, sub,
+		&StreamOpts{Seek: channel.entryKeyFromIndex(idx1), Max: Tail, Flags: OptNone})
+
 	sub.wait()
 
-	require.Equal(5, sub.count)
+	require.Equal(5, sub.count())
 
 	sub.expect(2)
-	channel.Subscribe(ctx, sub, &StreamStart{txnID1, 2, false})
-	sub.wait()
-	require.Equal(7, sub.count)
+	channel.Subscribe(ctx, sub,
+		&StreamOpts{Seek: channel.entryKeyFromIndex(idx1), Max: 2, Flags: OptNone})
 
-	msg, err := channel.Get(channel.KeyFor(uint64(3)))
+	sub.wait()
+	require.Equal(7, sub.count())
+
+	msg, err := channel.Get(channel.entryKeyFromIndex(idx3))
 	require.NoError(err)
-	require.Equal("message 3", string(msg))
+	require.Equal("message 3", string(msg.GetBody()))
+
+	// get the messages in the expected order, given resets
+	require.Equal(id(ent2), id(sub.received[0]))
+	require.Equal(id(ent3), id(sub.received[1]))
+	require.Equal(id(ent1), id(sub.received[2]))
+	require.Equal(id(ent2), id(sub.received[3]))
+	require.Equal(id(ent3), id(sub.received[4]))
+	require.Equal(id(ent1), id(sub.received[5]))
+	require.Equal(id(ent2), id(sub.received[6]))
+
 }
 
 func TestStore_Subscribe_ResetConcurrentAppends(t *testing.T) {
@@ -125,45 +231,59 @@ func TestStore_Subscribe_ResetConcurrentAppends(t *testing.T) {
 	channel, ctx, cancel := setup(t)
 	defer cancel()
 
-	txnID1, err := channel.Append([]byte("message 1"))
+	ent1 := helpers.NewEntry("message 1")
+	idx1, err := channel.Append(ent1)
 	require.NoError(err)
-	require.Equal(uint64(1), keyTxn(txnID1))
 
-	txnID2, err := channel.Append([]byte("message 2"))
+	ent2 := helpers.NewEntry("message 2")
+	idx2, err := channel.Append(ent2)
 	require.NoError(err)
-	require.Equal(uint64(2), keyTxn(txnID2))
 
-	txnID3, err := channel.Append([]byte("message 3"))
+	ent3 := helpers.NewEntry("message 3")
+	_, err = channel.Append(ent3)
 	require.NoError(err)
-	require.Equal(uint64(3), keyTxn(txnID3))
 
 	sub := NewMockSubscriber(ctx)
 	sub.expect(2)
-	channel.Subscribe(ctx, sub, &StreamStart{txnID2, Tail, false})
+	channel.Subscribe(ctx, sub,
+		&StreamOpts{Seek: channel.entryKeyFromIndex(idx2), Max: Tail, Flags: OptNone})
+
 	sub.wait()
 
-	require.Equal(2, sub.count)
+	require.Equal(2, sub.count())
 
 	sub.expect(5)
 
 	// we're now resetting the subscription while a concurrent write
-	// is coming.  we can't make any guarantees about the order of
+	// is coming. we can't make any guarantees about the order of
 	// events here and we'll get the last message repeated.
-	channel.Subscribe(ctx, sub, &StreamStart{txnID1, Tail, false})
-	_, err = channel.Append([]byte("message 4"))
+	channel.Subscribe(ctx, sub,
+		&StreamOpts{Seek: channel.entryKeyFromIndex(idx1), Max: Tail, Flags: OptNone})
+
+	ent4 := helpers.NewEntry("message 4")
+	idx4, err := channel.Append(ent4)
 	require.NoError(err)
 	sub.wait()
 
-	require.Equal(7, sub.count)
+	require.Equal(7, sub.count())
 
-	msg, err := channel.Get(channel.KeyFor(uint64(4)))
+	msg, err := channel.Get(channel.entryKeyFromIndex(idx4))
 	require.NoError(err)
-	require.Equal("message 4", string(msg))
+	require.Equal("message 4", string(msg.GetBody()))
 
-	_, err = channel.Get(channel.KeyFor(uint64(5)))
+	idx4[len(idx4)-1] = 0xFF
+
+	_, err = channel.Get(channel.entryKeyFromIndex(idx4))
 	require.Error(err)
 	require.EqualError(err, badger.ErrKeyNotFound.Error())
 
+	// get the messages in the expected order, prior to reset
+	require.Equal(id(ent2), id(sub.received[0]))
+	require.Equal(id(ent3), id(sub.received[1]))
+
+	// we can't guarantee the order with concurrent resets and
+	// appends, just that the last one we see is the last one
+	require.Equal(id(ent4), id(sub.received[6]))
 }
 
 func TestStore_Restore_Channel(t *testing.T) {
@@ -184,22 +304,92 @@ func TestStore_Restore_Channel(t *testing.T) {
 		t.Fatalf(err.Error())
 	}
 
-	txnID, err := channel.Append([]byte("message 1"))
+	_, err = channel.Append(helpers.NewEntry("message 1"))
 	require.NoError(err)
-	require.Equal(uint64(1), keyTxn(txnID))
 
-	txnID, err = channel.Append([]byte("message 2"))
+	idx2, err := channel.Append(helpers.NewEntry("message 2"))
 	require.NoError(err)
-	require.Equal(uint64(2), keyTxn(txnID))
 
 	channel, err = store.Channel(channelID)
-	require.Equal(uint64(2), channel.txnID)
+	require.Equal(1, len(store.channels))
 
 	// TODO: we don't have a Channel shutdown mechanism separate from
 	// the Store
 	delete(store.channels, channelID)
 	channel, err = store.Channel(channelID)
-	require.Equal(uint64(2), channel.txnID)
+	require.Equal(1, len(store.channels))
+
+	msg, err := channel.Get(channel.entryKeyFromIndex(idx2))
+	require.NoError(err)
+	require.Equal("message 2", string(msg.GetBody()))
+}
+
+func TestStore_Subscribe_FromIndex(t *testing.T) {
+	t.Parallel()
+	require := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	cfg := testConfig()
+	store, err := New(ctx, cfg)
+	if err != nil {
+		t.Fatalf(err.Error())
+	}
+
+	channelID := helpers.ChannelURItoChannelID(t.Name())
+	channel, err := store.Channel(channelID)
+	if err != nil {
+		t.Fatalf(err.Error())
+	}
+
+	require.NotNil(channel)
+
+	_, err = channel.Append(helpers.NewEntry("message 1"))
+	require.NoError(err)
+
+	ent2 := helpers.NewEntry("message 2")
+	idx2, err := channel.Append(ent2)
+	require.NoError(err)
+
+	// note: intentionally out-of-order with "message 3"!
+	ent4 := helpers.NewEntry("message 4")
+	_, err = channel.Append(ent4)
+	require.NoError(err)
+
+	ent3 := helpers.NewEntry("message 3")
+	_, err = channel.Append(ent3)
+	require.NoError(err)
+
+	sub := NewMockSubscriber(ctx)
+	sub.expect(3)
+	channel.Subscribe(ctx, sub,
+		&StreamOpts{Seek: idx2, Max: 3, Flags: OptKeysOnly | OptFromIndex})
+
+	sub.wait()
+	require.Equal(3, sub.count())
+
+	require.Equal(id(ent2), id(sub.received[0]))
+	require.Equal(id(ent4), id(sub.received[1]))
+	require.Equal(id(ent3), id(sub.received[2]))
+
+	require.Equal([]byte(nil), sub.received[0].GetBody())
+	require.Equal([]byte(nil), sub.received[1].GetBody())
+	require.Equal([]byte(nil), sub.received[2].GetBody())
+
+	// do it again, this time without key-only set...
+	sub.expect(3)
+	channel.Subscribe(ctx, sub,
+		&StreamOpts{Seek: idx2, Max: 3, Flags: OptFromIndex})
+	sub.wait()
+	require.Equal(6, sub.count())
+
+	require.Equal(id(ent2), id(sub.received[3]))
+	require.Equal(id(ent4), id(sub.received[4]))
+	require.Equal(id(ent3), id(sub.received[5]))
+
+	require.Equal("message 2", string(sub.received[3].GetBody()))
+	require.Equal("message 4", string(sub.received[4].GetBody()))
+	require.Equal("message 3", string(sub.received[5].GetBody()))
 }
 
 func setup(t *testing.T) (*Channel, context.Context, func()) {
@@ -230,6 +420,10 @@ func testConfig() Config {
 	return cfg
 }
 
+func id(msg *pb.Msg) []byte {
+	return msg.EntryHeader.GetEntryID()
+}
+
 func keyTxn(k []byte) uint64 {
 	return binary.BigEndian.Uint64(k[64:])
 }
@@ -237,9 +431,12 @@ func keyTxn(k []byte) uint64 {
 type MockSubscriber struct {
 	ctx      context.Context
 	cancelFn context.CancelFunc
-	count    int
-	rx       chan []byte
-	wg       sync.WaitGroup
+
+	lock     sync.Mutex
+	received []*pb.Msg
+
+	rx chan *pb.Msg
+	wg sync.WaitGroup
 }
 
 func NewMockSubscriber(pctx context.Context) *MockSubscriber {
@@ -247,13 +444,14 @@ func NewMockSubscriber(pctx context.Context) *MockSubscriber {
 	sub := &MockSubscriber{
 		ctx:      ctx,
 		cancelFn: cancel,
-		rx:       make(chan []byte),
+		received: []*pb.Msg{},
+		rx:       make(chan *pb.Msg),
 	}
 	go sub.run()
 	return sub
 }
 
-func (sub *MockSubscriber) Send(msg []byte) {
+func (sub *MockSubscriber) Send(msg *pb.Msg) {
 	sub.rx <- msg
 }
 
@@ -270,11 +468,24 @@ func (sub *MockSubscriber) run() {
 		select {
 		case <-sub.ctx.Done():
 			return
-		case <-sub.rx:
-			sub.count++
+		case rx := <-sub.rx:
+			printMsg(rx)
+			sub.lock.Lock()
+			sub.received = append(sub.received, rx)
+			sub.lock.Unlock()
 			sub.wg.Done()
 		}
 	}
+}
+
+func (sub *MockSubscriber) count() int {
+	sub.lock.Lock()
+	defer sub.lock.Unlock()
+	return len(sub.received)
+}
+
+func printMsg(msg *pb.Msg) {
+	// fmt.Printf("%x\n", msg.EntryHeader.GetEntryID())
 }
 
 // test helper to set an expected number of entries to be sent

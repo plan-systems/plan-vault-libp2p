@@ -3,12 +3,16 @@ package store
 import (
 	"bytes"
 	"context"
-	"encoding/binary"
+	"errors"
 	"math"
 	"sync"
+	"time"
 
 	badger "github.com/dgraph-io/badger/v2"
+	"google.golang.org/protobuf/proto"
+
 	"github.com/plan-systems/plan-vault-libp2p/helpers"
+	pb "github.com/plan-systems/plan-vault-libp2p/protos"
 )
 
 /*
@@ -47,11 +51,11 @@ Design notes on schema:
   * byte  32    table space (Entries) + reserved control bits
   * bytes 34:63 entry ID
 
-* ArrivalIndex key schema (68 bytes):
+* ArrivalIndex key schema (69 bytes):
   * bytes 00:31 channel ID (sha256)
   * byte  32    table space (ArrivalIndex) + reserved control bits
   * bytes 33:38 timestamp in unix seconds (UTC, big endian)
-  * bytes 39:68 entry ID
+  * bytes 39:69 entry ID
 
 * Entry value schema is a protos.Msg w/ Op and ReqID left unset
 
@@ -66,11 +70,20 @@ type Store struct {
 	lock     sync.Mutex
 }
 
-const Tail = math.MaxUint64
+const (
+	Tail            = math.MaxUint64
+	keySpaceEntries = 0x01
+	keySpaceArrival = 0x02
+)
+
+var (
+	ErrorInvalidEntryID = errors.New("invalid entry ID")
+)
 
 type ChannelID = [32]byte
 type PeerID = [32]byte
 type StoreKey = []byte
+type ArrivalKey = []byte
 
 func New(ctx context.Context, cfg Config) (*Store, error) {
 
@@ -104,23 +117,20 @@ func (s *Store) Channel(id ChannelID) (*Channel, error) {
 		return channel, nil
 	}
 
-	var b bytes.Buffer
-	b.Write(id[:])
-	b.Write(s.id[:])
+	prefix := make([]byte, 33)
+	copy(prefix, id[:])
+	prefix[32] = keySpaceEntries
 
-	prefix := make([]byte, 64)
-	b.Read(prefix)
+	indexPrefix := make([]byte, 33)
+	copy(indexPrefix, id[:])
+	indexPrefix[32] = keySpaceArrival
 
 	channel := &Channel{
-		id:     id,
-		prefix: prefix,
-		store:  s,
+		id:          id,
+		prefix:      prefix,
+		indexPrefix: indexPrefix,
+		store:       s,
 	}
-	txnID, err := channel.restoreTxnID()
-	if err != nil {
-		return nil, err
-	}
-	channel.txnID = txnID
 
 	channel.subscribers = map[helpers.UUID]*subscriber{}
 	s.channels[id] = channel
@@ -128,14 +138,14 @@ func (s *Store) Channel(id ChannelID) (*Channel, error) {
 	return channel, nil
 }
 
-// Channel is an abstraction around the Store that tracks state for txnIDs
+// Channel is an abstraction around the Store that tracks state for subscribers
 type Channel struct {
-	id     ChannelID
-	prefix []byte // 64-byte (channel + peer ID)
-	store  *Store
+	id ChannelID
 
-	txnID uint64
-	lock  sync.Mutex
+	prefix      []byte
+	indexPrefix []byte
+
+	store *Store
 
 	subscribers map[helpers.UUID]*subscriber
 	sLock       sync.RWMutex
@@ -162,18 +172,16 @@ func (c *Channel) watch() {
 		}, c.prefix)
 }
 
-// restoreTxnID is used to get the last txnID after a Channel restart
-// or after the Vault is restarted. This is not safe to use outside of
-// the Store.Channel method
-func (c *Channel) restoreTxnID() (uint64, error) {
-	var txnID uint64
+// lastKey is used to get the last entry ID after a reconnection,
+// assuming the client doesn't ask for a replay.
+func (c *Channel) lastKey() (StoreKey, error) {
+	var key []byte
 	err := c.store.db.View(func(txn *badger.Txn) error {
 		opts := badger.DefaultIteratorOptions
 		opts.Reverse = true
 		opts.PrefetchValues = false
 
 		it := txn.NewIterator(opts)
-		var err error
 		defer it.Close()
 
 		// this check looks redundant and fussy but is definitely
@@ -183,94 +191,123 @@ func (c *Channel) restoreTxnID() (uint64, error) {
 			if !it.ValidForPrefix(c.prefix) {
 				continue
 			}
-			item := it.Item()
-			k := item.Key()
-			txnID = binary.BigEndian.Uint64(k[64:])
-			return err
+			key = it.Item().Key()
+			return nil
 		}
 		return nil // new channel
 	})
-	return txnID, err
-
-}
-
-// Append creates a new entry and returns the storage txnID for that
-// entry.
-func (c *Channel) Append(entry []byte) (StoreKey, error) {
-	var key StoreKey
-	err := c.store.db.Update(func(txn *badger.Txn) error {
-		key, _ = c.NextKey()
-		e := badger.NewEntry(key, entry)
-		err := txn.SetEntry(e)
-		return err
-	})
 	return key, err
+
 }
 
-// NextKey increments the internal txnID and returns the key for it
-func (c *Channel) NextKey() (StoreKey, uint64) {
-	c.lock.Lock()
-	c.txnID++
-	c.lock.Unlock()
-	return c.KeyFor(c.txnID), c.txnID
+// Append creates a new entry and returns the ArrivalIndex key for
+// that entry, so that clients can use it as a bookmark
+func (c *Channel) Append(entry *pb.Msg) (StoreKey, error) {
+	id, err := c.entryID(entry)
+	if err != nil {
+		return nil, err
+	}
+
+	key := c.EntryKey(id)
+	m, err := proto.Marshal(entry)
+	if err != nil {
+		return key, err
+	}
+	arrivalKey := c.arrivalKey(id)
+
+	err = c.store.db.Update(func(txn *badger.Txn) error {
+		ent := badger.NewEntry(key, m)
+		err := txn.SetEntry(ent)
+		if err != nil {
+			return err
+		}
+
+		// TODO: use WithTTL to expire index keys?
+		index := badger.NewEntry(arrivalKey, nil)
+		return txn.SetEntry(index)
+	})
+	return arrivalKey, err
 }
 
-// LastKey returns the head key of the channel
-func (c *Channel) LastKey() StoreKey {
-	c.lock.Lock()
-	defer c.lock.Unlock()
-	return c.KeyFor(c.txnID)
+func (c *Channel) entryID(entry *pb.Msg) ([]byte, error) {
+	id := entry.GetEntryHeader().GetEntryID()
+	if id == nil {
+		return []byte{}, ErrorInvalidEntryID
+	}
+	return id, nil
 }
 
-// KeyAfter returns the next key after the argument for this channel
-// without advancing the internal transaction ID
-func (c *Channel) KeyAfter(k StoreKey) StoreKey {
-	txnID := binary.BigEndian.Uint64(k[64:])
-	txnID++
-	return c.KeyFor(txnID)
-}
-
-// FirstKey returns the genesis key for the channel
-func (c *Channel) FirstKey() StoreKey {
-	return c.KeyFor(0)
-}
-
-// KeyFor generates a key for a specific txnID
-func (c *Channel) KeyFor(txnID uint64) StoreKey {
-	k := make([]byte, 72)
+func (c *Channel) EntryKey(entryID []byte) []byte {
+	k := make([]byte, 63)
 	copy(k, c.prefix)
-	binary.BigEndian.PutUint64(k[64:], txnID)
+	copy(k[33:], entryID)
+	return k
+}
+
+func (c *Channel) arrivalKey(entryID []byte) []byte {
+	k := make([]byte, 69)
+	copy(k, c.indexPrefix)
+
+	ts := time.Now().Unix() << 16
+	k[33] = byte(ts >> 56)
+	k[34] = byte(ts >> 48)
+	k[35] = byte(ts >> 40)
+	k[36] = byte(ts >> 32)
+	k[37] = byte(ts >> 24)
+	k[38] = byte(ts >> 16)
+
+	copy(k[39:], entryID)
+	return k
+}
+
+func (c *Channel) entryKeyFromIndex(index []byte) []byte {
+	k := make([]byte, 63)
+	copy(k, c.prefix)
+	copy(k[33:], index[39:])
+	return k
+}
+
+func (c *Channel) entryIDFromIndex(index []byte) []byte {
+	k := make([]byte, 30)
+	copy(k, index[39:])
+	return k
+}
+
+// firstKey returns the genesis key for the channel
+func (c *Channel) firstKey() StoreKey {
+	k := make([]byte, 30)
+	copy(k, c.prefix) // TODO: do we need one for the ArrivalIndex?
 	return k
 }
 
 // get accesses a key directly, implemented mostly for debugging and
 // testing purposes
-func (c *Channel) Get(key StoreKey) ([]byte, error) {
-	var result []byte
+func (c *Channel) Get(key StoreKey) (*pb.Msg, error) {
+	msg := &pb.Msg{}
 	err := c.store.db.View(func(txn *badger.Txn) error {
 		item, err := txn.Get(key)
 		if err != nil {
 			return err
 		}
 		err = item.Value(func(val []byte) error {
-			result = val[:]
-			return nil
+			return proto.Unmarshal(val, msg)
 		})
 		return nil
 	})
-	return result, err
+	return msg, err
 }
 
 // Subscribe sets up a subscription that will fire the target's Send
 // callback with each entry between the `start` and `max` IDs.
-func (c *Channel) Subscribe(pctx context.Context, target SubscriptionTarget, start *StreamStart) {
+func (c *Channel) Subscribe(pctx context.Context, target SubscriptionTarget, opts *StreamOpts) {
 	c.sLock.Lock()
 	defer c.sLock.Unlock()
 
+	// TODO: should we allow two subscribers per stream per channel?
+	// one for entries and one for index?
 	id := target.ID()
-
 	if oldSub, ok := c.subscribers[id]; ok {
-		oldSub.reset(start)
+		oldSub.reset(opts)
 		return
 	}
 
@@ -282,15 +319,20 @@ func (c *Channel) Subscribe(pctx context.Context, target SubscriptionTarget, sta
 		channel: c,
 		target:  target,
 		rx:      make(chan struct{}),
-		resetRx: make(chan *StreamStart),
+		resetRx: make(chan *StreamOpts),
 	}
 
 	c.subscribers[sub.id] = sub
-	go sub.read(start)
+
+	if opts.Flags.Has(OptFromIndex) {
+		go sub.readFromIndex(opts)
+	} else {
+		go sub.read(opts)
+	}
 }
 
 type SubscriptionTarget interface {
-	Send([]byte)
+	Send(*pb.Msg)
 	Done()
 	ID() helpers.UUID
 }
@@ -302,7 +344,7 @@ type subscriber struct {
 	channel *Channel
 	target  SubscriptionTarget
 	rx      chan struct{}
-	resetRx chan *StreamStart
+	resetRx chan *StreamOpts
 }
 
 // TODO: once a channel has no subscribers, we should close it so
@@ -317,13 +359,27 @@ func (s *subscriber) notify() {
 	s.rx <- struct{}{}
 }
 
-type StreamStart struct {
-	Start   []byte
-	Max     uint64
-	IdsOnly bool
+type StreamOpts struct {
+	Seek  []byte
+	Max   uint64
+	Flags StreamOptFlags
 }
 
-func (s *subscriber) reset(r *StreamStart) {
+type StreamOptFlags uint8
+
+const (
+	OptNone     StreamOptFlags = 0
+	OptKeysOnly StreamOptFlags = 1 << iota
+	OptSkipFirst
+	OptFromHead
+	OptFromGenesis
+	OptFromIndex
+)
+
+func (opt StreamOptFlags) Set(flag StreamOptFlags) StreamOptFlags { return opt | flag }
+func (opt StreamOptFlags) Has(flag StreamOptFlags) bool           { return opt&flag != 0 }
+
+func (s *subscriber) reset(r *StreamOpts) {
 	s.resetRx <- r
 }
 
@@ -341,26 +397,37 @@ func (s *subscriber) reset(r *StreamStart) {
 // This coaleces multiple update notifications that happen within a
 // single iterator, but also lets us block if we're not dirty so that
 // we're not continuously iterating if there's no incoming writes.
-func (sub *subscriber) read(start *StreamStart) error {
-	if start == nil {
+func (sub *subscriber) read(opts *StreamOpts) error {
+	if opts == nil {
 		return nil
 	}
 	defer sub.unsubscribe()
 	var count uint64
 	var dirty bool
 	var lastSeen []byte
-	key := start.Start
-	max := start.Max
+
+	if opts.Flags.Has(OptFromHead) {
+		key, err := sub.channel.lastKey()
+		if err != nil {
+			return err
+		}
+		opts.Seek = key
+	}
+
+	key := opts.Seek
+	max := opts.Max
+	if opts.Flags.Has(OptSkipFirst) {
+		lastSeen = key
+	}
 
 	iterate := func() error {
 		return sub.channel.store.db.View(func(txn *badger.Txn) error {
 			dirty = false // by this point we have a snapshot, so reset dirty flag
-			opts := badger.DefaultIteratorOptions
-			opts.PrefetchSize = 10
-			opts.Prefix = sub.channel.prefix
-			it := txn.NewIterator(opts)
+			iOpts := badger.DefaultIteratorOptions
+			iOpts.PrefetchSize = 10
+			iOpts.Prefix = sub.channel.prefix
+			it := txn.NewIterator(iOpts)
 			defer it.Close()
-
 			it.Seek(key)
 			for {
 				if count >= max {
@@ -376,8 +443,20 @@ func (sub *subscriber) read(start *StreamStart) error {
 						return nil
 					}
 					dirty = true
-					key = reset.Start
+
+					if reset.Flags.Has(OptFromHead) {
+						k, err := sub.channel.lastKey()
+						if err != nil {
+							return err
+						}
+						reset.Seek = k
+					}
+					key = reset.Seek
 					max = reset.Max
+					if opts.Flags.Has(OptSkipFirst) {
+						lastSeen = key
+					}
+
 					return nil
 				default:
 					if !it.Valid() {
@@ -394,17 +473,28 @@ func (sub *subscriber) read(start *StreamStart) error {
 						it.Next()
 						continue
 					}
-					err := item.Value(func(v []byte) error {
-						// TODO: handle keys-only case
-						// TODO: we need to copy any values we send
-						sub.target.Send(v)
+					msg := &pb.Msg{}
+					if opts.Flags.Has(OptKeysOnly) {
+						msg.EntryHeader = &pb.EntryHeader{EntryID: key}
+						sub.target.Send(msg)
 						key = item.Key()
 						lastSeen = key
 						count++
-						return nil
-					})
-					if err != nil {
-						return err
+					} else {
+						err := item.Value(func(v []byte) error {
+							err := proto.Unmarshal(v, msg)
+							if err != nil {
+								return err
+							}
+							sub.target.Send(msg)
+							key = item.Key()
+							lastSeen = key
+							count++
+							return nil
+						})
+						if err != nil {
+							return err
+						}
 					}
 					it.Next()
 				}
@@ -431,4 +521,73 @@ func (sub *subscriber) read(start *StreamStart) error {
 		}
 
 	}
+}
+
+// readFromIndex iterates over the ArrivalIndex so that clients can
+// catch up after having been offline.
+//
+// TODO: This is intended to run concurrently with the client's
+// subscription so that we don't need to mark snapshots as dirty as we
+// do in `read`, but does that actually work?
+func (sub *subscriber) readFromIndex(opts *StreamOpts) error {
+	defer sub.unsubscribe()
+	var count uint64
+	key := opts.Seek
+	max := opts.Max // typically will be Tail
+
+	return sub.channel.store.db.View(func(txn *badger.Txn) error {
+		iOpts := badger.DefaultIteratorOptions
+		iOpts.PrefetchSize = 10
+		iOpts.Prefix = sub.channel.indexPrefix
+		it := txn.NewIterator(iOpts)
+		defer it.Close()
+
+		it.Seek(key)
+		for {
+			if count >= max {
+				return nil
+			}
+			select {
+			case <-sub.ctx.Done():
+				return nil
+			case <-sub.rx:
+				// the readFromIndex just throws this away, but it
+				// does need to consume it to avoid locking
+				// TODO: fix this, it's super gross!
+			default:
+				if !it.Valid() {
+					// end of iterator, but this only means we've run out of
+					// items in this snapshot, not that no more have landed
+					// while we were iterating
+					return nil
+				}
+				item := it.Item()
+				msg := &pb.Msg{}
+				if opts.Flags.Has(OptKeysOnly) {
+					key = sub.channel.entryIDFromIndex(item.Key())
+					msg.EntryHeader = &pb.EntryHeader{EntryID: key}
+					sub.target.Send(msg)
+				} else {
+					key = sub.channel.entryKeyFromIndex(item.Key())
+					item, err := txn.Get(key)
+					if err != nil {
+						return err
+					}
+					err = item.Value(func(v []byte) error {
+						err := proto.Unmarshal(v, msg)
+						if err != nil {
+							return err
+						}
+						sub.target.Send(msg)
+						return nil
+					})
+					if err != nil {
+						return err
+					}
+				}
+				count++
+				it.Next()
+			}
+		}
+	})
 }

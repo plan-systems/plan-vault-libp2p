@@ -122,8 +122,8 @@ func (v *VaultServer) open(stream Stream, req *pb.FeedReq) *pb.Msg {
 	if err != nil {
 		return errorResponse(reqID, pb.ErrCode_DatabaseError, err)
 	}
-	start := newStreamStart(channel, req.GetOpenFeed())
-	channel.Subscribe(context.TODO(), &stream, start)
+	opts := newStreamOpts(req.GetOpenFeed())
+	channel.Subscribe(context.TODO(), &stream, opts)
 
 	resp := &pb.Msg{
 		Op:    pb.MsgOp_ReqComplete,
@@ -136,22 +136,38 @@ func (v *VaultServer) open(stream Stream, req *pb.FeedReq) *pb.Msg {
 
 }
 
-func newStreamStart(channel *store.Channel, req *pb.OpenFeedReq) *store.StreamStart {
+func newStreamOpts(req *pb.OpenFeedReq) *store.StreamOpts {
 
 	mode := req.GetStreamMode()
 	start := req.GetSeekEntryID() // TODO: we need to convert this to a Store txnID?
+
+	skipFirst := store.OptNone
+	idsOnly := store.OptNone
+	fromHead := store.OptNone
+	fromGenesis := store.OptNone
+	fromIndex := store.OptNone
 
 	switch mode {
 	case pb.StreamMode_DontStream:
 		return nil
 	case pb.StreamMode_FromGenesis:
-		start = channel.FirstKey()
+		start = []byte{}
+		fromGenesis = store.OptFromGenesis
 	case pb.StreamMode_AtEntry:
 		// no-op
 	case pb.StreamMode_AfterEntry:
-		start = channel.KeyAfter(start)
+		skipFirst = store.OptSkipFirst
 	case pb.StreamMode_AfterHead:
-		start = channel.LastKey()
+		skipFirst = store.OptSkipFirst
+		fromHead = store.OptFromHead
+		start = []byte{}
+	case pb.StreamMode_FromIndex:
+		start = []byte{}
+		fromIndex = store.OptFromIndex
+	}
+
+	if req.GetSendEntryIDsOnly() {
+		idsOnly = store.OptKeysOnly
 	}
 
 	var max uint64
@@ -163,10 +179,12 @@ func newStreamStart(channel *store.Channel, req *pb.OpenFeedReq) *store.StreamSt
 		max = store.Tail
 	}
 
-	return &store.StreamStart{
-		Start:   start,
-		Max:     max,
-		IdsOnly: req.GetSendEntryIDsOnly(),
+	// TODO: should we reject (fromHead | fromIndex)?
+
+	return &store.StreamOpts{
+		Seek:  start,
+		Max:   max,
+		Flags: idsOnly | skipFirst | fromHead | fromGenesis | fromIndex,
 	}
 
 }
@@ -176,7 +194,7 @@ type Stream struct {
 	id helpers.UUID
 }
 
-func (s *Stream) Send(msg []byte)  {}
+func (s *Stream) Send(msg *pb.Msg) {}
 func (s *Stream) Done()            {}
 func (s *Stream) ID() helpers.UUID { return s.id }
 
@@ -203,7 +221,7 @@ func (v *VaultServer) append(req *pb.FeedReq) *pb.Msg {
 	if err != nil {
 		return errorResponse(reqID, pb.ErrCode_DatabaseError, err)
 	}
-	key, err := channel.Append(body)
+	key, err := channel.Append(entry)
 	if err != nil {
 		return errorResponse(reqID, pb.ErrCode_DatabaseError, err)
 	}

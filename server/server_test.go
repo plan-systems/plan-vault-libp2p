@@ -31,35 +31,32 @@ func TestServer_StreamAppend(t *testing.T) {
 	session := newMockSessionServer(ctx)
 	go server.VaultSession(session)
 
+	ent1 := helpers.NewEntry(t.Name())
+	ent1.EntryHeader.FeedURI = t.Name()
+	ent1.EntryHeader.ParentID = []byte("passthru") // store shouldn't touch this
+
 	session.clientSend(&pb.FeedReq{
-		ReqOp: pb.ReqOp_AppendEntry,
-		NewEntry: &pb.Msg{
-			EntryHeader: &pb.EntryHeader{
-				FeedURI:  t.Name(),
-				ParentID: []byte("I am a useless piece of data"), // TODO: cut this
-			},
-			Body: []byte{0xFF},
-		},
+		ReqOp:    pb.ReqOp_AppendEntry,
+		NewEntry: ent1,
 	})
 
 	resp := <-session.tx
 	require.Equal(pb.StatusCode_Working, resp.GetStatus().GetCode())
-	key := resp.GetEntryHeader().GetEntryID()
-	require.NotNil(key)
+	require.NotNil(id(ent1))
 
 	channelID := helpers.ChannelURItoChannelID(t.Name())
 	c, err := db.Channel(channelID)
 	require.NoError(err)
 
-	val, err := c.Get(key)
+	val, err := c.Get(c.EntryKey(id(ent1)))
 	require.NoError(err)
-	require.Equal([]byte{0xFF}, val)
-
+	require.Equal(id(ent1), val.EntryHeader.GetEntryID())
+	require.Equal("passthru", string(val.EntryHeader.GetParentID()))
+	require.Equal([]byte(t.Name()), val.GetBody())
 }
 
 func TestServer_InvalidRequests(t *testing.T) {
 	t.Parallel()
-	require := require.New(t)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -106,26 +103,19 @@ func TestServer_InvalidRequests(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			session.clientSend(tc.req)
 			resp := <-session.tx
-			require.Equal(tc.expected, resp.GetErr().GetCode())
+			require.Equal(t, tc.expected, resp.GetErr().GetCode())
 		})
 	}
 
 }
 
-func TestServer_StreamStart(t *testing.T) {
+func TestServer_StreamOpts(t *testing.T) {
 	t.Parallel()
-	require := require.New(t)
-
-	// TODO: it would be nice if we could have a more minimal channel
-	// key interface to pass along here instead of having to stand up the
-	// whole store
-	c, _, cancel := dbSetup(t)
-	defer cancel()
 
 	tests := []struct {
 		name     string
 		req      *pb.OpenFeedReq
-		expected *store.StreamStart
+		expected *store.StreamOpts
 	}{
 		{
 			name:     "nil-open / open for append-only",
@@ -136,61 +126,73 @@ func TestServer_StreamStart(t *testing.T) {
 			name: "tail with seek",
 			req: &pb.OpenFeedReq{
 				StreamMode:       pb.StreamMode_AtEntry,
-				SeekEntryID:      c.KeyFor(1),
 				MaxEntriesToSend: -1,
 				SendEntryIDsOnly: false,
 			},
-			expected: &store.StreamStart{
-				Start: c.KeyFor(1), Max: store.Tail, IdsOnly: false},
+			expected: &store.StreamOpts{
+				Max:   store.Tail,
+				Flags: store.OptNone},
 		},
 		{
 			name: "tail from head",
 			req: &pb.OpenFeedReq{
 				StreamMode:       pb.StreamMode_AfterHead,
-				SeekEntryID:      c.KeyFor(42), // should be ignored
 				MaxEntriesToSend: -1,
 				SendEntryIDsOnly: false,
 			},
-			expected: &store.StreamStart{
-				Start: c.KeyFor(0), Max: store.Tail, IdsOnly: false},
+			expected: &store.StreamOpts{
+				Seek:  []byte{},
+				Max:   store.Tail,
+				Flags: store.OptFromHead | store.OptSkipFirst},
 		},
 		{
 			name: "open for window, keys only",
 			req: &pb.OpenFeedReq{
 				StreamMode:       pb.StreamMode_AfterEntry,
-				SeekEntryID:      c.KeyFor(20),
 				MaxEntriesToSend: 10,
 				SendEntryIDsOnly: true,
 			},
-			expected: &store.StreamStart{
-				Start: c.KeyFor(21), Max: 10, IdsOnly: true},
+			expected: &store.StreamOpts{
+				Max:   10,
+				Flags: store.OptKeysOnly | store.OptSkipFirst},
 		},
 		{
-			name: "open genesis",
+			name: "open genesis, keys only",
 			req: &pb.OpenFeedReq{
 				StreamMode:       pb.StreamMode_FromGenesis,
-				SeekEntryID:      c.KeyFor(20), // should be ignored
 				MaxEntriesToSend: 10,
 				SendEntryIDsOnly: true,
 			},
-			expected: &store.StreamStart{
-				Start: c.FirstKey(), Max: 10, IdsOnly: true},
+			expected: &store.StreamOpts{
+				Seek:  []byte{},
+				Max:   10,
+				Flags: store.OptFromGenesis | store.OptKeysOnly},
 		},
 	}
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			got := newStreamStart(c, tc.req)
+			require := require.New(t)
+			tc.req.SeekEntryID = helpers.NewEntryID()
+			got := newStreamOpts(tc.req)
 			if tc.expected == nil {
 				require.Nil(got)
 			} else {
-				require.Equal(tc.expected.Start, got.Start)
+				if tc.expected.Seek != nil {
+					require.Equal(tc.expected.Seek, got.Seek)
+				} else {
+					require.Equal(tc.req.SeekEntryID, got.Seek)
+				}
 				require.Equal(tc.expected.Max, got.Max)
-				require.Equal(tc.expected.IdsOnly, got.IdsOnly)
+				require.Equal(tc.expected.Flags, got.Flags)
 			}
 		})
 	}
 
+}
+
+func id(msg *pb.Msg) []byte {
+	return msg.EntryHeader.GetEntryID()
 }
 
 type MockSessionServer struct {
