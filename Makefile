@@ -20,8 +20,9 @@ GOFILES = $(shell find . -type f -name '*.go')
 build: bin/vault
 
 bin/vault: $(GOFILES)
-	GOPRIVATE='github.com/libp2p/*' go build -o bin/vault
-
+	GOPRIVATE='github.com/libp2p/*' go build \
+		-trimpath \
+		-o bin/vault
 
 # ----------------------------------------
 # test
