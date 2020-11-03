@@ -165,24 +165,31 @@ message Msg {
 enum StreamMode {
 
     // DontStream means the server should not stream any entries.
-    // This mode is typically used by clients that only want to append entries to a feed.
-    // VaultCtx and SeekEntryID are ignored.
+    // This mode is typically used by clients that only want to append
+    // entries to a feed.  SeekEntryID is ignored.
     DontStream              = 0;
 
-    // FromGenesis tells the server to start streaming from the very beginning of the feed.
-    // VaultCtx and SeekEntryID are ignored.
+    // FromGenesis tells the server to start streaming from the very
+    // beginning of the feed.  SeekEntryID is ignored.
     FromGenesis             = 1;
 
     // AtEntry tells the server to stream starting with SeekEntryID.
     AtEntry                 = 4;
 
-    // AfterEntry tells the server to stream starting with the entry immediately *after* SeekEntryID.
+    // AfterEntry tells the server to stream starting with the entry
+    // immediately *after* SeekEntryID.
     AfterEntry              = 5;
 
     // AfterHead tells the server to resume after the latest entry in this feed.
-    // VaultCtx and SeekEntryID are ignored.
+    // SeekEntryID is ignored.
     AfterHead               = 7;
 
+    // FromIndex tells the server to treat stream entries in order of
+    // arrival at this vault peer, rather than ordered by
+    // EntryID. This allows clients to catch up to entries received
+    // while they were offline. The SeekEntryID is treated as the
+    // index.
+    FromIndex               = 9;
 }
 
 
