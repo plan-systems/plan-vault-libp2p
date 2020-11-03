@@ -51,9 +51,7 @@ type VaultServer struct {
 
 func (v *VaultServer) VaultSession(stream pb.VaultGrpc_VaultSessionServer) error {
 
-	// TODO: need to maintain stream state so that we stream new entries back
 	s := Stream{stream, helpers.NewUUID()}
-	//	s.id =
 
 	for {
 		req, err := stream.Recv()
@@ -93,11 +91,6 @@ func (v *VaultServer) VaultSession(stream pb.VaultGrpc_VaultSessionServer) error
 	}
 }
 
-// TODO: calling this the channel genesis is probably too high
-// level for the Vault to understand: how could we determine
-// if we're the "first" entry for the entire channel if
-// another peer might already have that channel open? I think we
-// can only guarantee our (channel ID + own ID + 0)
 func (v *VaultServer) new(req *pb.FeedReq) *pb.Msg { return nil }
 
 // open starts a stream of entries from a Channel in the Store. A
@@ -139,7 +132,7 @@ func (v *VaultServer) open(stream Stream, req *pb.FeedReq) *pb.Msg {
 func newStreamOpts(req *pb.OpenFeedReq) *store.StreamOpts {
 
 	mode := req.GetStreamMode()
-	start := req.GetSeekEntryID() // TODO: we need to convert this to a Store txnID?
+	start := req.GetSeekEntryID()
 
 	skipFirst := store.OptNone
 	idsOnly := store.OptNone

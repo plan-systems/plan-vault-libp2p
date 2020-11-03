@@ -525,10 +525,6 @@ func (sub *subscriber) read(opts *StreamOpts) error {
 
 // readFromIndex iterates over the ArrivalIndex so that clients can
 // catch up after having been offline.
-//
-// TODO: This is intended to run concurrently with the client's
-// subscription so that we don't need to mark snapshots as dirty as we
-// do in `read`, but does that actually work?
 func (sub *subscriber) readFromIndex(opts *StreamOpts) error {
 	defer sub.unsubscribe()
 	var count uint64
