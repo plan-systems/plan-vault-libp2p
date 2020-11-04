@@ -324,7 +324,7 @@ func (c *Channel) Subscribe(pctx context.Context, target SubscriptionTarget, opt
 
 	c.subscribers[sub.id] = sub
 
-	if opts.Flags.Has(OptFromIndex) {
+	if opts.fromIndex() {
 		go sub.readFromIndex(opts)
 	} else {
 		go sub.read(opts)
@@ -376,8 +376,11 @@ const (
 	OptFromIndex
 )
 
-func (opt StreamOptFlags) Set(flag StreamOptFlags) StreamOptFlags { return opt | flag }
-func (opt StreamOptFlags) Has(flag StreamOptFlags) bool           { return opt&flag != 0 }
+func (opts StreamOpts) keysOnly() bool    { return opts.Flags&OptKeysOnly != 0 }
+func (opts StreamOpts) skipFirst() bool   { return opts.Flags&OptSkipFirst != 0 }
+func (opts StreamOpts) fromHead() bool    { return opts.Flags&OptFromHead != 0 }
+func (opts StreamOpts) fromGenesis() bool { return opts.Flags&OptFromGenesis != 0 }
+func (opts StreamOpts) fromIndex() bool   { return opts.Flags&OptFromIndex != 0 }
 
 func (s *subscriber) reset(r *StreamOpts) {
 	s.resetRx <- r
@@ -406,7 +409,7 @@ func (sub *subscriber) read(opts *StreamOpts) error {
 	var dirty bool
 	var lastSeen []byte
 
-	if opts.Flags.Has(OptFromHead) {
+	if opts.fromHead() {
 		key, err := sub.channel.lastKey()
 		if err != nil {
 			return err
@@ -416,7 +419,7 @@ func (sub *subscriber) read(opts *StreamOpts) error {
 
 	key := opts.Seek
 	max := opts.Max
-	if opts.Flags.Has(OptSkipFirst) {
+	if opts.skipFirst() {
 		lastSeen = key
 	}
 
@@ -444,7 +447,7 @@ func (sub *subscriber) read(opts *StreamOpts) error {
 					}
 					dirty = true
 
-					if reset.Flags.Has(OptFromHead) {
+					if reset.fromHead() {
 						k, err := sub.channel.lastKey()
 						if err != nil {
 							return err
@@ -453,7 +456,7 @@ func (sub *subscriber) read(opts *StreamOpts) error {
 					}
 					key = reset.Seek
 					max = reset.Max
-					if opts.Flags.Has(OptSkipFirst) {
+					if opts.skipFirst() {
 						lastSeen = key
 					}
 
@@ -474,7 +477,7 @@ func (sub *subscriber) read(opts *StreamOpts) error {
 						continue
 					}
 					msg := &pb.Msg{}
-					if opts.Flags.Has(OptKeysOnly) {
+					if opts.keysOnly() {
 						msg.EntryHeader = &pb.EntryHeader{EntryID: key}
 						sub.target.Send(msg)
 						key = item.Key()
@@ -559,7 +562,7 @@ func (sub *subscriber) readFromIndex(opts *StreamOpts) error {
 				}
 				item := it.Item()
 				msg := &pb.Msg{}
-				if opts.Flags.Has(OptKeysOnly) {
+				if opts.keysOnly() {
 					key = sub.channel.entryIDFromIndex(item.Key())
 					msg.EntryHeader = &pb.EntryHeader{EntryID: key}
 					sub.target.Send(msg)

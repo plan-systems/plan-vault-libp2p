@@ -118,7 +118,7 @@ func TestServer_StreamOpts(t *testing.T) {
 		expected *store.StreamOpts
 	}{
 		{
-			name:     "nil-open / open for append-only",
+			name:     "nil-open or open for append-only",
 			req:      &pb.OpenFeedReq{StreamMode: pb.StreamMode_DontStream},
 			expected: nil,
 		},
@@ -146,7 +146,7 @@ func TestServer_StreamOpts(t *testing.T) {
 				Flags: store.OptFromHead | store.OptSkipFirst},
 		},
 		{
-			name: "open for window, keys only",
+			name: "open for window with keys only",
 			req: &pb.OpenFeedReq{
 				StreamMode:       pb.StreamMode_AfterEntry,
 				MaxEntriesToSend: 10,
@@ -157,7 +157,7 @@ func TestServer_StreamOpts(t *testing.T) {
 				Flags: store.OptKeysOnly | store.OptSkipFirst},
 		},
 		{
-			name: "open genesis, keys only",
+			name: "open genesis with keys only",
 			req: &pb.OpenFeedReq{
 				StreamMode:       pb.StreamMode_FromGenesis,
 				MaxEntriesToSend: 10,

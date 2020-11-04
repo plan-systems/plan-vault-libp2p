@@ -19,28 +19,28 @@ func TestStore_StreamOptFlags(t *testing.T) {
 	t.Parallel()
 	require := require.New(t)
 
-	f := OptKeysOnly
-	require.True(f.Has(OptKeysOnly))
-	require.False(f.Has(OptSkipFirst))
+	opts := StreamOpts{Flags: OptKeysOnly}
+	require.True(opts.keysOnly())
+	require.False(opts.skipFirst())
 
-	f = OptSkipFirst | OptNone
-	require.True(f.Has(OptSkipFirst))
-	require.Equal(OptSkipFirst, f)
+	opts = StreamOpts{Flags: OptSkipFirst | OptNone}
+	require.True(opts.skipFirst())
+	require.Equal(OptSkipFirst, opts.Flags)
 
-	f = OptSkipFirst | OptKeysOnly
-	require.True(f.Has(OptSkipFirst))
-	require.True(f.Has(OptKeysOnly))
+	opts = StreamOpts{Flags: OptSkipFirst | OptKeysOnly}
+	require.True(opts.skipFirst())
+	require.True(opts.keysOnly())
 
-	f = OptSkipFirst | OptKeysOnly | OptFromHead
-	require.True(f.Has(OptSkipFirst))
-	require.True(f.Has(OptKeysOnly))
-	require.True(f.Has(OptFromHead))
+	opts = StreamOpts{Flags: OptSkipFirst | OptKeysOnly | OptFromHead}
+	require.True(opts.skipFirst())
+	require.True(opts.keysOnly())
+	require.True(opts.fromHead())
 
-	f = OptSkipFirst | OptKeysOnly | OptFromHead | OptFromGenesis
-	require.True(f.Has(OptSkipFirst))
-	require.True(f.Has(OptKeysOnly))
-	require.True(f.Has(OptFromHead))
-	require.True(f.Has(OptFromGenesis))
+	opts = StreamOpts{Flags: OptSkipFirst | OptKeysOnly | OptFromHead | OptFromGenesis}
+	require.True(opts.skipFirst())
+	require.True(opts.keysOnly())
+	require.True(opts.fromHead())
+	require.True(opts.fromGenesis())
 }
 
 func TestStore_Subscribe_FromEmpty(t *testing.T) {
