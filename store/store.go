@@ -78,6 +78,7 @@ const (
 
 var (
 	ErrorInvalidEntryID = errors.New("invalid entry ID")
+	ErrorKeyExists      = errors.New("entry ID already exists")
 )
 
 type ChannelID = [32]byte
@@ -216,8 +217,25 @@ func (c *Channel) Append(entry *pb.Msg) (StoreKey, error) {
 	arrivalKey := c.arrivalKey(id)
 
 	err = c.store.db.Update(func(txn *badger.Txn) error {
+		// badger can't give us "append-only", so we need to enforce
+		// that we don't have another entry for this key.
+		//
+		// Note: we can't guarantee ordering in case of a tight race
+		// because the check happens within a snapshot. If the client
+		// verifies the content hash portion of the key before
+		// accepting entries, at worst an attacker can DoS writes,
+		// assuming they can observe entry keys in transit (but we
+		// should use TLS)
+		_, err := txn.Get(key)
+		if err == nil {
+			return ErrorKeyExists
+		}
+		if err != badger.ErrKeyNotFound {
+			return err
+		}
+
 		ent := badger.NewEntry(key, m)
-		err := txn.SetEntry(ent)
+		err = txn.SetEntry(ent)
 		if err != nil {
 			return err
 		}

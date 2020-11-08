@@ -62,6 +62,10 @@ func TestStore_Subscribe_FromEmpty(t *testing.T) {
 	idx2, err := channel.Append(ent2)
 	require.NoError(err)
 
+	// duplicate keys should fail
+	_, err = channel.Append(ent2)
+	require.Error(err, ErrorKeyExists)
+
 	sub.wait()
 	require.Equal(2, sub.count())
 
