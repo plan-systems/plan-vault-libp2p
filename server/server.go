@@ -62,21 +62,20 @@ type VaultServer struct {
 
 func (v *VaultServer) VaultSession(session pb.VaultGrpc_VaultSessionServer) error {
 
-	conn := &Connection{session,
-		helpers.NewUUID(), map[int32]*Stream{}, sync.RWMutex{}}
+	ctx, cancel := context.WithCancel(v.ctx)
+	conn := newConnection(session, ctx)
+	defer cancel()
 
 	for {
 		select {
-		case <-v.ctx.Done():
+		case <-conn.ctx.Done():
 			return nil
 		default:
 			req, err := conn.Recv()
 			if err == io.EOF {
-				// TODO: make sure we've cleaned up gracefully
 				return nil
 			}
 			if err != nil {
-				// TODO: what are we supposed to be doing here?
 				return err
 			}
 			if req == nil {
@@ -137,7 +136,7 @@ func (v *VaultServer) open(conn *Connection, req *pb.FeedReq) *pb.Msg {
 	}
 	opts := newStreamOpts(req.GetOpenFeed())
 
-	ctx, cancel := context.WithCancel(v.ctx)
+	ctx, cancel := context.WithCancel(conn.ctx)
 	stream := &Stream{conn: conn, id: reqID, cancel: cancel}
 	conn.streams[reqID] = stream
 
@@ -207,10 +206,21 @@ func newStreamOpts(req *pb.OpenFeedReq) *store.StreamOpts {
 
 }
 
+func newConnection(session pb.VaultGrpc_VaultSessionServer, ctx context.Context) *Connection {
+	return &Connection{
+		session,
+		ctx,
+		helpers.NewUUID(),
+		map[int32]*Stream{},
+		sync.RWMutex{},
+	}
+}
+
 // Connection is a thin wrapper around the gRPC session, with a unique
 // ID per connection so that we can keep track of connections
 type Connection struct {
 	pb.VaultGrpc_VaultSessionServer
+	ctx     context.Context
 	id      helpers.UUID
 	streams map[int32]*Stream
 	lock    sync.RWMutex
