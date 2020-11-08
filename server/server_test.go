@@ -15,7 +15,7 @@ import (
 	"github.com/plan-systems/plan-vault-libp2p/store"
 )
 
-func TestServer_OpenClose(t *testing.T) {
+func TestServer_NewOpenClose(t *testing.T) {
 	t.Parallel()
 	require := require.New(t)
 
@@ -47,14 +47,13 @@ func TestServer_OpenClose(t *testing.T) {
 	ent1.EntryHeader.FeedURI = t.Name()
 
 	session.clientSend(&pb.FeedReq{
-		ReqOp:    pb.ReqOp_AppendEntry,
+		ReqOp:    pb.ReqOp_ChannelGenesis,
 		ReqID:    8,
 		NewEntry: ent1,
 	})
 
 	resp = <-session.tx
 	require.Equal(pb.MsgOp_ReqComplete, resp.GetOp())
-	require.Equal(pb.StatusCode_Working, resp.GetStatus().GetCode())
 	require.Equal(int32(8), resp.GetReqID())
 
 	// appended entry should come back for subscriber
@@ -93,7 +92,6 @@ func TestServer_OpenClose(t *testing.T) {
 
 	resp = <-session.tx
 	require.Equal(pb.MsgOp_ReqComplete, resp.GetOp())
-	require.Equal(pb.StatusCode_Working, resp.GetStatus().GetCode())
 	require.Equal(int32(9), resp.GetReqID())
 
 	// TODO: this is a little janky... we can't wait on something we
@@ -133,7 +131,6 @@ func TestServer_StreamAppend(t *testing.T) {
 
 	resp := <-session.tx
 	require.Equal(pb.MsgOp_ReqComplete, resp.GetOp())
-	require.Equal(pb.StatusCode_Working, resp.GetStatus().GetCode())
 	require.NotNil(id(ent1))
 
 	channelID := helpers.ChannelURItoChannelID(t.Name())

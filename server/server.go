@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -19,6 +20,14 @@ import (
 
 // TODO: figure out how we want to tune this
 const maxBodySize = 10000000
+
+var (
+	ErrorInvalidRequest       = errors.New("invalid request")
+	ErrorInvalidOpenReq       = errors.New("invalid open request")
+	ErrorInvalidFeedURI       = errors.New("invalid feed URI")
+	ErrorInvalidEntryBody     = errors.New("invalid entry body")
+	ErrorInvalidUnsupportedOp = errors.New("unsupported operation")
+)
 
 func Run(ctx context.Context, node *p2p.Node, db *store.Store) {
 	listener, err := net.Listen("tcp", fmt.Sprintf("%s:%d", *grpcAddr, *grpcPort))
@@ -74,7 +83,7 @@ func (v *VaultServer) VaultSession(session pb.VaultGrpc_VaultSessionServer) erro
 				// TODO: if our ReqOp zero value is an error value,
 				// we can avoid this check
 				err = conn.Send(errorResponse(0, pb.ErrCode_InvalidRequest,
-					fmt.Errorf("invalid request")))
+					ErrorInvalidRequest))
 				continue
 			}
 			switch req.GetReqOp() {
@@ -98,7 +107,11 @@ func (v *VaultServer) VaultSession(session pb.VaultGrpc_VaultSessionServer) erro
 	}
 }
 
-func (v *VaultServer) new(req *pb.FeedReq) *pb.Msg { return nil }
+// new writes a genesis entry for the channel
+// TODO: it's not clear how this should behave any differently than `append`?
+func (v *VaultServer) new(req *pb.FeedReq) *pb.Msg {
+	return v.append(req)
+}
 
 // open starts a stream of entries from a Channel in the Store. A
 // session can have multiple open streams.
@@ -107,14 +120,14 @@ func (v *VaultServer) open(conn *Connection, req *pb.FeedReq) *pb.Msg {
 	reqID := req.GetReqID()
 	openReq := req.GetOpenFeed()
 	if openReq == nil {
-		return errorResponse(reqID, pb.ErrCode_InvalidRequest,
-			fmt.Errorf("invalid open request: missing OpenReq"))
+		return errorResponse(reqID,
+			pb.ErrCode_InvalidRequest, ErrorInvalidOpenReq)
 
 	}
 	uri := openReq.GetFeedURI()
 	if uri == "" {
-		return errorResponse(reqID, pb.ErrCode_InvalidFeedURI,
-			fmt.Errorf("invalid feed URI"))
+		return errorResponse(reqID,
+			pb.ErrCode_InvalidFeedURI, ErrorInvalidFeedURI)
 	}
 
 	channelID := helpers.ChannelURItoChannelID(uri)
@@ -250,7 +263,6 @@ func (v *VaultServer) close(conn *Connection, req *pb.FeedReq) *pb.Msg {
 		ReqID: reqID,
 		// TODO: the reqID is already in the message, so why do
 		// we need it in the status?
-		// Status: &pb.ReqStatus{Code: pb.StatusCode_Info},
 	}
 	return resp
 }
@@ -263,12 +275,12 @@ func (v *VaultServer) append(req *pb.FeedReq) *pb.Msg {
 	uri := header.GetFeedURI()
 	if uri == "" {
 		return errorResponse(reqID, pb.ErrCode_InvalidFeedURI,
-			fmt.Errorf("invalid feed URI"))
+			ErrorInvalidFeedURI)
 	}
 	body := entry.GetBody()
 	if len(body) == 0 || len(body) > maxBodySize {
 		return errorResponse(reqID, pb.ErrCode_InvalidRequest,
-			fmt.Errorf("invalid entry body"))
+			ErrorInvalidEntryBody)
 
 	}
 	channelID := helpers.ChannelURItoChannelID(uri)
@@ -285,15 +297,13 @@ func (v *VaultServer) append(req *pb.FeedReq) *pb.Msg {
 		Op:          pb.MsgOp_ReqComplete,
 		ReqID:       reqID,
 		EntryHeader: &pb.EntryHeader{EntryID: key},
-		// TODO: we should have a "complete" status
-		Status: &pb.ReqStatus{Code: pb.StatusCode_Working},
 	}
 	return resp
 }
 
 func (v *VaultServer) unsupported(req *pb.FeedReq) *pb.Msg {
-	return errorResponse(req.GetReqID(), pb.ErrCode_InvalidRequest,
-		fmt.Errorf("unsupported op: %v", req.GetReqOp()))
+	return errorResponse(req.GetReqID(),
+		pb.ErrCode_InvalidRequest, ErrorInvalidUnsupportedOp)
 }
 
 func errorResponse(reqID int32, code pb.ErrCode, err error) *pb.Msg {
