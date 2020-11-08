@@ -7,12 +7,12 @@ import (
 	"time"
 
 	"github.com/dgraph-io/badger/v2"
+	"github.com/stretchr/testify/require"
+	"google.golang.org/grpc/metadata"
+
 	"github.com/plan-systems/plan-vault-libp2p/helpers"
 	pb "github.com/plan-systems/plan-vault-libp2p/protos"
 	"github.com/plan-systems/plan-vault-libp2p/store"
-
-	"github.com/stretchr/testify/require"
-	"google.golang.org/grpc/metadata"
 )
 
 func TestServer_OpenClose(t *testing.T) {
@@ -100,11 +100,11 @@ func TestServer_OpenClose(t *testing.T) {
 	// never expect to come, so wait a little bit to make sure we
 	// don't get a send for the subscriber
 	timeout, cancelTimeout := context.WithTimeout(ctx, time.Millisecond*200)
+	defer cancelTimeout()
 	select {
 	case <-timeout.Done():
 		// ok
 	case resp = <-session.tx:
-		cancelTimeout()
 		t.Fatalf("should not have received a new entry after subscriber was closed")
 	}
 }
@@ -189,6 +189,26 @@ func TestServer_InvalidRequests(t *testing.T) {
 			},
 			expected: pb.ErrCode_InvalidFeedURI,
 		},
+		{
+			name: "append without feed uri",
+			req: &pb.FeedReq{
+				ReqOp:    pb.ReqOp_AppendEntry,
+				NewEntry: helpers.NewEntry(t.Name()),
+			},
+			expected: pb.ErrCode_InvalidFeedURI,
+		},
+		{
+			name: "append with empty body",
+			req: &pb.FeedReq{
+				ReqOp: pb.ReqOp_AppendEntry,
+				NewEntry: &pb.Msg{
+					EntryHeader: &pb.EntryHeader{
+						EntryID: helpers.NewEntryID(),
+						FeedURI: t.Name()},
+				},
+			},
+			expected: pb.ErrCode_InvalidRequest,
+		},
 	}
 
 	for _, tc := range tests {
@@ -259,6 +279,18 @@ func TestServer_StreamOpts(t *testing.T) {
 				Seek:  []byte{},
 				Max:   10,
 				Flags: store.OptFromGenesis | store.OptKeysOnly},
+		},
+		{
+			name: "tail from index",
+			req: &pb.OpenFeedReq{
+				StreamMode:       pb.StreamMode_FromIndex,
+				MaxEntriesToSend: -1,
+				SendEntryIDsOnly: true,
+			},
+			expected: &store.StreamOpts{
+				Seek:  []byte{},
+				Max:   store.Tail,
+				Flags: store.OptKeysOnly | store.OptFromIndex},
 		},
 	}
 
