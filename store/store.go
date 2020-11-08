@@ -62,7 +62,6 @@ Design notes on schema:
 */
 
 type Store struct {
-	id  PeerID
 	db  *badger.DB
 	ctx context.Context
 
@@ -82,7 +81,6 @@ var (
 )
 
 type ChannelID = [32]byte
-type PeerID = [32]byte
 type StoreKey = []byte
 type ArrivalKey = []byte
 
@@ -93,7 +91,6 @@ func New(ctx context.Context, cfg Config) (*Store, error) {
 		return nil, err
 	}
 	store := &Store{
-		id:       cfg.PeerID,
 		db:       db,
 		ctx:      ctx,
 		channels: map[ChannelID]*Channel{},
