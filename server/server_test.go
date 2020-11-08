@@ -4,6 +4,7 @@ import (
 	"context"
 	"io"
 	"testing"
+	"time"
 
 	"github.com/dgraph-io/badger/v2"
 	"github.com/plan-systems/plan-vault-libp2p/helpers"
@@ -14,19 +15,109 @@ import (
 	"google.golang.org/grpc/metadata"
 )
 
+func TestServer_OpenClose(t *testing.T) {
+	t.Parallel()
+	require := require.New(t)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	db := dbSetup(t, ctx)
+
+	server := &VaultServer{ctx: ctx, db: db}
+
+	session := newMockSessionServer(ctx)
+	go server.VaultSession(session)
+
+	session.clientSend(&pb.FeedReq{
+		ReqOp: pb.ReqOp_OpenFeed,
+		ReqID: 7,
+		OpenFeed: &pb.OpenFeedReq{
+			FeedURI:          t.Name(),
+			StreamMode:       pb.StreamMode_AfterHead,
+			MaxEntriesToSend: -1,
+			SendEntryIDsOnly: true,
+		},
+	})
+
+	resp := <-session.tx
+	require.Equal(pb.StatusCode_Working, resp.GetStatus().GetCode())
+	require.Equal(int32(7), resp.GetReqID())
+
+	ent1 := helpers.NewEntry(t.Name())
+	ent1.EntryHeader.FeedURI = t.Name()
+
+	session.clientSend(&pb.FeedReq{
+		ReqOp:    pb.ReqOp_AppendEntry,
+		ReqID:    8,
+		NewEntry: ent1,
+	})
+
+	resp = <-session.tx
+	require.Equal(pb.MsgOp_ReqComplete, resp.GetOp())
+	require.Equal(pb.StatusCode_Working, resp.GetStatus().GetCode())
+	require.Equal(int32(8), resp.GetReqID())
+
+	// appended entry should come back for subscriber
+	resp = <-session.tx
+	require.Equal(pb.MsgOp_FeedEntry, resp.GetOp())
+	require.Equal(pb.StatusCode_InfoMsg, resp.GetStatus().GetCode())
+	require.Equal(int32(7), resp.GetReqID())
+	require.Equal(id(ent1), resp.EntryHeader.GetEntryID())
+
+	session.clientSend(&pb.FeedReq{
+		ReqOp: pb.ReqOp_CancelReq,
+		ReqID: 7,
+	})
+	resp = <-session.tx
+	require.Equal(pb.MsgOp_ReqDiscarded, resp.GetOp())
+	require.Equal(int32(7), resp.GetReqID())
+
+	// duplicate close is ok
+	session.clientSend(&pb.FeedReq{
+		ReqOp: pb.ReqOp_CancelReq,
+		ReqID: 7,
+	})
+	resp = <-session.tx
+	require.Equal(pb.MsgOp_ReqDiscarded, resp.GetOp())
+	require.Equal(int32(7), resp.GetReqID())
+
+	// new append
+	ent2 := helpers.NewEntry(t.Name())
+	ent2.EntryHeader.FeedURI = t.Name()
+
+	session.clientSend(&pb.FeedReq{
+		ReqOp:    pb.ReqOp_AppendEntry,
+		ReqID:    9,
+		NewEntry: ent2,
+	})
+
+	resp = <-session.tx
+	require.Equal(pb.MsgOp_ReqComplete, resp.GetOp())
+	require.Equal(pb.StatusCode_Working, resp.GetStatus().GetCode())
+	require.Equal(int32(9), resp.GetReqID())
+
+	// TODO: this is a little janky... we can't wait on something we
+	// never expect to come, so wait a little bit to make sure we
+	// don't get a send for the subscriber
+	timeout, cancelTimeout := context.WithTimeout(ctx, time.Millisecond*200)
+	select {
+	case <-timeout.Done():
+		// ok
+	case resp = <-session.tx:
+		cancelTimeout()
+		t.Fatalf("should not have received a new entry after subscriber was closed")
+	}
+}
+
 func TestServer_StreamAppend(t *testing.T) {
 	t.Parallel()
 	require := require.New(t)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	cfg := testConfig()
-	db, err := store.New(ctx, cfg)
-	if err != nil {
-		t.Fatalf(err.Error())
-	}
+	db := dbSetup(t, ctx)
 
-	server := &VaultServer{db: db}
+	server := &VaultServer{ctx: ctx, db: db}
 
 	session := newMockSessionServer(ctx)
 	go server.VaultSession(session)
@@ -41,6 +132,7 @@ func TestServer_StreamAppend(t *testing.T) {
 	})
 
 	resp := <-session.tx
+	require.Equal(pb.MsgOp_ReqComplete, resp.GetOp())
 	require.Equal(pb.StatusCode_Working, resp.GetStatus().GetCode())
 	require.NotNil(id(ent1))
 
@@ -61,7 +153,7 @@ func TestServer_InvalidRequests(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	server := &VaultServer{}
+	server := &VaultServer{ctx: ctx}
 	session := newMockSessionServer(ctx)
 	go server.VaultSession(session)
 
@@ -237,22 +329,13 @@ func (s *MockSessionServer) Context() context.Context     { return s.ctx }
 func (s *MockSessionServer) SendMsg(m interface{}) error  { return nil }
 func (s *MockSessionServer) RecvMsg(m interface{}) error  { return nil }
 
-func dbSetup(t *testing.T) (*store.Channel, context.Context, func()) {
-
-	ctx, cancel := context.WithCancel(context.Background())
+func dbSetup(t *testing.T, ctx context.Context) *store.Store {
 	cfg := testConfig()
 	store, err := store.New(ctx, cfg)
 	if err != nil {
 		t.Fatalf(err.Error())
 	}
-
-	channelID := helpers.ChannelURItoChannelID(t.Name())
-	channel, err := store.Channel(channelID)
-	if err != nil {
-		t.Fatalf(err.Error())
-	}
-
-	return channel, ctx, cancel
+	return store
 }
 
 func testConfig() store.Config {

@@ -6,6 +6,7 @@ import (
 	"io"
 	"log"
 	"net"
+	"sync"
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
@@ -37,7 +38,7 @@ func Run(ctx context.Context, node *p2p.Node, db *store.Store) {
 	// TODO: look thru the options to thread a context thru here
 	grpcServer := grpc.NewServer(opts...)
 
-	vaultSrv := &VaultServer{node: node, db: db}
+	vaultSrv := &VaultServer{ctx: ctx, node: node, db: db}
 	pb.RegisterVaultGrpcServer(grpcServer, vaultSrv)
 	grpcServer.Serve(listener)
 }
@@ -45,49 +46,55 @@ func Run(ctx context.Context, node *p2p.Node, db *store.Store) {
 type VaultServer struct {
 	pb.UnimplementedVaultGrpcServer
 
+	ctx  context.Context
 	node *p2p.Node
 	db   *store.Store
 }
 
-func (v *VaultServer) VaultSession(stream pb.VaultGrpc_VaultSessionServer) error {
+func (v *VaultServer) VaultSession(session pb.VaultGrpc_VaultSessionServer) error {
 
-	s := Stream{stream, helpers.NewUUID()}
+	conn := &Connection{session,
+		helpers.NewUUID(), map[int32]*Stream{}, sync.RWMutex{}}
 
 	for {
-		req, err := stream.Recv()
-		if err == io.EOF {
-			// TODO: make sure we've cleaned up gracefully
+		select {
+		case <-v.ctx.Done():
 			return nil
-		}
-		if err != nil {
-			// TODO: what are we supposed to be doing here?
-			return err
-		}
-		if req == nil {
-			// TODO: if our ReqOp zero value is an error value,
-			// we can avoid this check
-			err = stream.Send(errorResponse(0, pb.ErrCode_InvalidRequest,
-				fmt.Errorf("invalid request")))
-			continue
-		}
-		switch req.GetReqOp() {
-		case pb.ReqOp_ChannelGenesis:
-			err = stream.Send(v.new(req))
-		case pb.ReqOp_OpenFeed:
-			err = stream.Send(v.open(s, req))
-		case pb.ReqOp_CancelReq:
-			err = stream.Send(v.close(s, req))
-		case pb.ReqOp_AppendEntry:
-			err = stream.Send(v.append(req))
 		default:
-			err = stream.Send(v.unsupported(req))
-		}
+			req, err := conn.Recv()
+			if err == io.EOF {
+				// TODO: make sure we've cleaned up gracefully
+				return nil
+			}
+			if err != nil {
+				// TODO: what are we supposed to be doing here?
+				return err
+			}
+			if req == nil {
+				// TODO: if our ReqOp zero value is an error value,
+				// we can avoid this check
+				err = conn.Send(errorResponse(0, pb.ErrCode_InvalidRequest,
+					fmt.Errorf("invalid request")))
+				continue
+			}
+			switch req.GetReqOp() {
+			case pb.ReqOp_ChannelGenesis:
+				err = conn.Send(v.new(req))
+			case pb.ReqOp_OpenFeed:
+				err = conn.Send(v.open(conn, req))
+			case pb.ReqOp_CancelReq:
+				err = conn.Send(v.close(conn, req))
+			case pb.ReqOp_AppendEntry:
+				err = conn.Send(v.append(req))
+			default:
+				err = conn.Send(v.unsupported(req))
+			}
 
-		if err != nil {
-			// TODO: do something better here
-			log.Fatalf("send failed: %v", err)
+			if err != nil {
+				// TODO: do something better here
+				log.Fatalf("send failed: %v", err)
+			}
 		}
-
 	}
 }
 
@@ -95,7 +102,7 @@ func (v *VaultServer) new(req *pb.FeedReq) *pb.Msg { return nil }
 
 // open starts a stream of entries from a Channel in the Store. A
 // session can have multiple open streams.
-func (v *VaultServer) open(stream Stream, req *pb.FeedReq) *pb.Msg {
+func (v *VaultServer) open(conn *Connection, req *pb.FeedReq) *pb.Msg {
 
 	reqID := req.GetReqID()
 	openReq := req.GetOpenFeed()
@@ -116,7 +123,12 @@ func (v *VaultServer) open(stream Stream, req *pb.FeedReq) *pb.Msg {
 		return errorResponse(reqID, pb.ErrCode_DatabaseError, err)
 	}
 	opts := newStreamOpts(req.GetOpenFeed())
-	channel.Subscribe(context.TODO(), &stream, opts)
+
+	ctx, cancel := context.WithCancel(v.ctx)
+	stream := &Stream{conn: conn, id: reqID, cancel: cancel}
+	conn.streams[reqID] = stream
+
+	channel.Subscribe(ctx, stream, opts)
 
 	resp := &pb.Msg{
 		Op:    pb.MsgOp_ReqComplete,
@@ -182,16 +194,66 @@ func newStreamOpts(req *pb.OpenFeedReq) *store.StreamOpts {
 
 }
 
-type Stream struct {
+// Connection is a thin wrapper around the gRPC session, with a unique
+// ID per connection so that we can keep track of connections
+type Connection struct {
 	pb.VaultGrpc_VaultSessionServer
-	id helpers.UUID
+	id      helpers.UUID
+	streams map[int32]*Stream
+	lock    sync.RWMutex
 }
 
-func (s *Stream) Send(msg *pb.Msg) {}
-func (s *Stream) Done()            {}
-func (s *Stream) ID() helpers.UUID { return s.id }
+// Stream is a thin wrapper around Connection with a unique
+// client-determined ID, so that clients can reference the stream
+// later
+type Stream struct {
+	conn   *Connection
+	id     int32 // client-determined ID for the stream
+	cancel context.CancelFunc
+}
 
-func (v *VaultServer) close(stream Stream, req *pb.FeedReq) *pb.Msg { return nil }
+// Publish sends the message thru the stream's connection to the
+// client
+func (s *Stream) Publish(msg *pb.Msg) {
+	msg.ReqID = s.id
+	s.conn.Send(msg)
+}
+
+// Done removes the stream from the Connection
+func (s *Stream) Done() {
+	s.cancel()
+	s.conn.lock.Lock()
+	defer s.conn.lock.Unlock()
+	delete(s.conn.streams, s.id)
+}
+
+// ID returns the connection ID because the store enforces a
+// per-connection unique constraint on streams. Opening a new stream
+// on the same channel closes the old stream.
+func (s *Stream) ID() helpers.UUID { return s.conn.id }
+
+func (v *VaultServer) close(conn *Connection, req *pb.FeedReq) *pb.Msg {
+	reqID := req.GetReqID()
+	conn.lock.RLock()
+	stream, ok := conn.streams[reqID]
+	conn.lock.RUnlock()
+
+	if ok {
+		stream.Done()
+	}
+
+	// closing is idempotent; we don't return an error if there's no
+	// stream with this ReqID because a concurrent request may have
+	// done it already
+	resp := &pb.Msg{
+		Op:    pb.MsgOp_ReqDiscarded,
+		ReqID: reqID,
+		// TODO: the reqID is already in the message, so why do
+		// we need it in the status?
+		// Status: &pb.ReqStatus{Code: pb.StatusCode_Info},
+	}
+	return resp
+}
 
 // append writes a new entry to the Store
 func (v *VaultServer) append(req *pb.FeedReq) *pb.Msg {

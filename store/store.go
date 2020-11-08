@@ -319,7 +319,7 @@ func (c *Channel) Get(key StoreKey) (*pb.Msg, error) {
 	return msg, err
 }
 
-// Subscribe sets up a subscription that will fire the target's Send
+// Subscribe sets up a subscription that will fire the target's Publish
 // callback with each entry between the `start` and `max` IDs.
 func (c *Channel) Subscribe(pctx context.Context, target SubscriptionTarget, opts *StreamOpts) {
 	c.sLock.Lock()
@@ -354,7 +354,7 @@ func (c *Channel) Subscribe(pctx context.Context, target SubscriptionTarget, opt
 }
 
 type SubscriptionTarget interface {
-	Send(*pb.Msg)
+	Publish(*pb.Msg)
 	Done()
 	ID() helpers.UUID
 }
@@ -503,7 +503,7 @@ func (sub *subscriber) read(opts *StreamOpts) error {
 						key = item.Key()
 						msg.EntryHeader = &pb.EntryHeader{
 							EntryID: sub.channel.entryIDFromKey(key)}
-						sub.target.Send(msg)
+						sub.target.Publish(msg)
 						lastSeen = key
 						count++
 					} else {
@@ -512,7 +512,7 @@ func (sub *subscriber) read(opts *StreamOpts) error {
 							if err != nil {
 								return err
 							}
-							sub.target.Send(msg)
+							sub.target.Publish(msg)
 							key = item.Key()
 							lastSeen = key
 							count++
@@ -588,7 +588,7 @@ func (sub *subscriber) readFromIndex(opts *StreamOpts) error {
 				if opts.keysOnly() {
 					key = sub.channel.entryIDFromIndex(item.Key())
 					msg.EntryHeader = &pb.EntryHeader{EntryID: key}
-					sub.target.Send(msg)
+					sub.target.Publish(msg)
 				} else {
 					key = sub.channel.entryKeyFromIndex(item.Key())
 					item, err := txn.Get(key)
@@ -600,7 +600,7 @@ func (sub *subscriber) readFromIndex(opts *StreamOpts) error {
 						if err != nil {
 							return err
 						}
-						sub.target.Send(msg)
+						sub.target.Publish(msg)
 						return nil
 					})
 					if err != nil {

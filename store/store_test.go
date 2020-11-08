@@ -455,7 +455,7 @@ func NewMockSubscriber(pctx context.Context) *MockSubscriber {
 	return sub
 }
 
-func (sub *MockSubscriber) Send(msg *pb.Msg) {
+func (sub *MockSubscriber) Publish(msg *pb.Msg) {
 	sub.rx <- msg
 }
 
