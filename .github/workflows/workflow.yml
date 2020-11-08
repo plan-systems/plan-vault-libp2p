@@ -31,8 +31,8 @@ jobs:
       - name: "linting and static analysis"
         run: "make check"
 
-      - name: "test"
-        run: "make test"
-
       - name: "build"
         run: "make build"
+
+      - name: "test"
+        run: "make test"
