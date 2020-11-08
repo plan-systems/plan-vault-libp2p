@@ -291,6 +291,10 @@ func (c *Channel) entryIDFromIndex(index []byte) []byte {
 	return k
 }
 
+func (c *Channel) entryIDFromKey(key []byte) []byte {
+	return key[33:]
+}
+
 // firstKey returns the genesis key for the channel
 func (c *Channel) firstKey() StoreKey {
 	k := make([]byte, 30)
@@ -496,9 +500,10 @@ func (sub *subscriber) read(opts *StreamOpts) error {
 					}
 					msg := &pb.Msg{}
 					if opts.keysOnly() {
-						msg.EntryHeader = &pb.EntryHeader{EntryID: key}
-						sub.target.Send(msg)
 						key = item.Key()
+						msg.EntryHeader = &pb.EntryHeader{
+							EntryID: sub.channel.entryIDFromKey(key)}
+						sub.target.Send(msg)
 						lastSeen = key
 						count++
 					} else {
