@@ -24,7 +24,6 @@ func NewUUID() UUID {
 }
 
 // NewEntry returns a new entry Msg; used for testing
-// TODO: replace with a workspace-wide library function
 func NewEntry(msg string) *pb.Msg {
 	return &pb.Msg{
 		EntryHeader: &pb.EntryHeader{EntryID: NewEntryID()},
@@ -34,7 +33,6 @@ func NewEntry(msg string) *pb.Msg {
 
 // NewEntryID returns a new EntryID; used for testing only because it
 // doesn't include a hash, just a random suffix
-// TODO: replace with a workspace-wide library function
 func NewEntryID() []byte {
 	id := make([]byte, 30)
 	t := timestamp()

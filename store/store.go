@@ -65,8 +65,9 @@ type Store struct {
 	db  *badger.DB
 	ctx context.Context
 
+	updateCh chan *Channel
 	channels map[ChannelID]*Channel
-	lock     sync.Mutex
+	lock     sync.RWMutex
 }
 
 const (
@@ -93,7 +94,11 @@ func New(ctx context.Context, cfg Config) (*Store, error) {
 	store := &Store{
 		db:       db,
 		ctx:      ctx,
+		updateCh: nil,
 		channels: map[ChannelID]*Channel{},
+	}
+	if cfg.HasDiscovery {
+		store.updateCh = make(chan *Channel)
 	}
 
 	go func() { <-ctx.Done(); store.close() }()
@@ -102,6 +107,10 @@ func New(ctx context.Context, cfg Config) (*Store, error) {
 
 func (s *Store) close() {
 	s.db.Close()
+}
+
+func (s *Store) ChannelUpdates() chan *Channel {
+	return s.updateCh
 }
 
 // Channel creates a new channel and starts its watcher, or returns
@@ -132,13 +141,28 @@ func (s *Store) Channel(id ChannelID) (*Channel, error) {
 
 	channel.subscribers = map[helpers.UUID]*subscriber{}
 	s.channels[id] = channel
+	if s.updateCh != nil {
+		s.updateCh <- channel
+	}
 	channel.watch()
 	return channel, nil
 }
 
+// Channels returns the list of this Store's channels
+func (s *Store) Channels() map[ChannelID]*Channel {
+	s.lock.RLock()
+	defer s.lock.RUnlock()
+
+	// TODO: this actually only returns the channels that there are
+	// active subscribers for; we need to make this persistent to
+	// restore from restart
+	return s.channels
+}
+
 // Channel is an abstraction around the Store that tracks state for subscribers
 type Channel struct {
-	id ChannelID
+	id  ChannelID
+	uri string
 
 	prefix      []byte
 	indexPrefix []byte
@@ -147,6 +171,10 @@ type Channel struct {
 
 	subscribers map[helpers.UUID]*subscriber
 	sLock       sync.RWMutex
+}
+
+func (c *Channel) URI() string {
+	return c.uri
 }
 
 // watch wraps badger's DB.Subscribe(), broadcasting a
@@ -311,7 +339,7 @@ func (c *Channel) Get(key StoreKey) (*pb.Msg, error) {
 		err = item.Value(func(val []byte) error {
 			return proto.Unmarshal(val, msg)
 		})
-		return nil
+		return err
 	})
 	return msg, err
 }

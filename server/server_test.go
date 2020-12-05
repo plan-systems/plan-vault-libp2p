@@ -102,7 +102,7 @@ func TestServer_NewOpenClose(t *testing.T) {
 	select {
 	case <-timeout.Done():
 		// ok
-	case resp = <-session.tx:
+	case <-session.tx:
 		t.Fatalf("should not have received a new entry after subscriber was closed")
 	}
 }
