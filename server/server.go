@@ -13,12 +13,12 @@ import (
 	"google.golang.org/grpc/credentials"
 
 	"github.com/plan-systems/plan-vault-libp2p/helpers"
-	"github.com/plan-systems/plan-vault-libp2p/p2p"
 	pb "github.com/plan-systems/plan-vault-libp2p/protos"
 	"github.com/plan-systems/plan-vault-libp2p/store"
 )
 
 // TODO: figure out how we want to tune this
+// note: we can't send more than 1MB in a libp2p entry
 const maxBodySize = 10000000
 
 var (
@@ -29,7 +29,7 @@ var (
 	ErrorInvalidUnsupportedOp = errors.New("unsupported operation")
 )
 
-func Run(ctx context.Context, node *p2p.Node, db *store.Store) {
+func Run(ctx context.Context, db *store.Store) {
 	listener, err := net.Listen("tcp", fmt.Sprintf("%s:%d", *grpcAddr, *grpcPort))
 	if err != nil {
 		log.Fatalf("failed to set up listener: %v", err)
@@ -37,7 +37,7 @@ func Run(ctx context.Context, node *p2p.Node, db *store.Store) {
 
 	var opts []grpc.ServerOption
 	if *tls {
-		creds, err := credentials.NewServerTLSFromFile(*certFile, *keyFile)
+		creds, err := credentials.NewServerTLSFromFile(*certFile, *certKeyFile)
 		if err != nil {
 			log.Fatalf("failed to generate tls creds: %v", err)
 		}
@@ -47,7 +47,7 @@ func Run(ctx context.Context, node *p2p.Node, db *store.Store) {
 	// TODO: look thru the options to thread a context thru here
 	grpcServer := grpc.NewServer(opts...)
 
-	vaultSrv := &VaultServer{ctx: ctx, node: node, db: db}
+	vaultSrv := &VaultServer{ctx: ctx, db: db}
 	pb.RegisterVaultGrpcServer(grpcServer, vaultSrv)
 	grpcServer.Serve(listener)
 }
@@ -55,9 +55,8 @@ func Run(ctx context.Context, node *p2p.Node, db *store.Store) {
 type VaultServer struct {
 	pb.UnimplementedVaultGrpcServer
 
-	ctx  context.Context
-	node *p2p.Node
-	db   *store.Store
+	ctx context.Context
+	db  *store.Store
 }
 
 func (v *VaultServer) VaultSession(session pb.VaultGrpc_VaultSessionServer) error {
@@ -77,13 +76,6 @@ func (v *VaultServer) VaultSession(session pb.VaultGrpc_VaultSessionServer) erro
 			}
 			if err != nil {
 				return err
-			}
-			if req == nil {
-				// TODO: if our ReqOp zero value is an error value,
-				// we can avoid this check
-				err = conn.Send(errorResponse(0, pb.ErrCode_InvalidRequest,
-					ErrorInvalidRequest))
-				continue
 			}
 			switch req.GetReqOp() {
 			case pb.ReqOp_ChannelGenesis:

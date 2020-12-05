@@ -20,9 +20,10 @@ func main() {
 		log.Fatal(err)
 	}
 
-	host, err := p2p.New(ctx)
+	p2pCfg := p2p.DefaultConfig()
+	_, err = p2p.New(ctx, db, p2pCfg)
 	if err != nil {
 		log.Fatal(err)
 	}
-	server.Run(ctx, host, db)
+	server.Run(ctx, db)
 }

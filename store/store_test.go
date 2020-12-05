@@ -2,7 +2,6 @@ package store
 
 import (
 	"context"
-	"encoding/binary"
 	"fmt"
 	"sync"
 	"testing"
@@ -314,13 +313,15 @@ func TestStore_Restore_Channel(t *testing.T) {
 	idx2, err := channel.Append(helpers.NewEntry("message 2"))
 	require.NoError(err)
 
-	channel, err = store.Channel(channelID)
+	_, err = store.Channel(channelID)
+	require.NoError(err)
 	require.Equal(1, len(store.channels))
 
 	// TODO: we don't have a Channel shutdown mechanism separate from
 	// the Store
 	delete(store.channels, channelID)
 	channel, err = store.Channel(channelID)
+	require.NoError(err)
 	require.Equal(1, len(store.channels))
 
 	msg, err := channel.Get(channel.entryKeyFromIndex(idx2))
@@ -426,10 +427,6 @@ func testConfig() Config {
 
 func id(msg *pb.Msg) []byte {
 	return msg.EntryHeader.GetEntryID()
-}
-
-func keyTxn(k []byte) uint64 {
-	return binary.BigEndian.Uint64(k[64:])
 }
 
 type MockSubscriber struct {

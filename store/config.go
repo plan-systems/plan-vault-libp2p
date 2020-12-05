@@ -12,11 +12,13 @@ var (
 )
 
 type Config struct {
-	DB badger.Options
+	DB           badger.Options
+	HasDiscovery bool // TODO: replace this with top-level config
 }
 
 func DefaultConfig() Config {
 	return Config{
-		DB: badger.DefaultOptions(*dataDir),
+		DB:           badger.DefaultOptions(*dataDir),
+		HasDiscovery: false,
 	}
 }
