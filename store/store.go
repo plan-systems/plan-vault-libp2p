@@ -148,17 +148,6 @@ func (s *Store) Channel(id ChannelID) (*Channel, error) {
 	return channel, nil
 }
 
-// Channels returns the list of this Store's channels
-func (s *Store) Channels() map[ChannelID]*Channel {
-	s.lock.RLock()
-	defer s.lock.RUnlock()
-
-	// TODO: this actually only returns the channels that there are
-	// active subscribers for; we need to make this persistent to
-	// restore from restart
-	return s.channels
-}
-
 // Channel is an abstraction around the Store that tracks state for subscribers
 type Channel struct {
 	id  ChannelID

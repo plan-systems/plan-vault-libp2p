@@ -272,14 +272,6 @@ message ReqErr {
                 string              Msg                         = 2;
 }
 
-// PubsubState is for serializing a snapshot of known topics and peers
-// to the Store without having to persist it on a proper append-only
-// PLAN channel. This is internal to the Vault.
-message PubsubState {
-        repeated string Topics = 1;
-        repeated Peer   Peers  = 2;
-}
-
 // Peer is the body of a message sent over the discovery Channel for
 // sharing peer network addresses and public keys.
 message Peer {
@@ -296,6 +288,7 @@ message Peer {
         // multiaddrs is the list of network multiaddresses for this peer
         repeated      bytes          Multiaddrs            = 5;
 }
+
 
 // PeerUpdateOp tells us what to do with the Peer we just got. Note
 // that we only remove a peer ID when it's gone permanently, not when

@@ -1,0 +1,23 @@
+syntax = "proto3";
+option go_package = "github.com/plan-systems/plan-vault-libp2p/protos";
+package vault;
+import "protos/vault.proto";
+
+/*
+The messages in this file are those protobufs that are entirely
+internal to a vault, are never shared with other peers, and should
+never be found in pnodes or other PLAN components
+ */
+
+// PubsubState is for serializing a snapshot of known topics and peers
+// to the Store without having to persist it on a proper append-only
+// PLAN channel. This is internal to the Vault.
+message PubsubState {
+        repeated TopicPointer Topics = 1;
+        repeated Peer         Peers  = 2;
+}
+
+message TopicPointer {
+        string ID                 = 1;
+        bytes  LastEntryPublished = 2;
+}

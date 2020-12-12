@@ -81,9 +81,11 @@ nuke: clean
 .PHONY: protos
 
 ## generate code from protobufs
-protos: protos/vault.pb.go protos/vault_grpc.pb.go
+protos: protos/vault.pb.go protos/vault_grpc.pb.go protos/internal.pb.go
 
 protos/vault_grpc.pb.go: protos/vault.pb.go
+
+protos/internal.pb.go: protos/vault.pb.go
 
 protos/vault.pb.go: protos/vault.proto
 	protoc \
@@ -91,7 +93,8 @@ protos/vault.pb.go: protos/vault.proto
 		--go_opt=paths=source_relative \
 		--go-grpc_out=. \
 		--go-grpc_opt=paths=source_relative \
-		protos/vault.proto
+		protos/vault.proto \
+		protos/internal.proto
 
 .PHONY: protosync
 
