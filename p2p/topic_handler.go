@@ -3,7 +3,6 @@ package p2p
 import (
 	"context"
 	"fmt"
-	"sync"
 
 	pubsub "github.com/libp2p/go-libp2p-pubsub"
 	"google.golang.org/protobuf/proto"
@@ -26,45 +25,45 @@ type TopicHandler struct {
 	onReceive entryHandler
 
 	lastEntryID []byte
-	lock        sync.RWMutex
 }
 
 // entryHandler defines what the TopicHandler will do with new entries
 // it gets from peers
 type entryHandler func(entry *pb.Msg) error
 
-func NewTopicHandler(h *Host, channel *store.Channel, onRecv, onPublish entryHandler) (*TopicHandler, error) {
-	topic, err := h.pubsub.Join(channel.URI())
+func NewTopicHandler(h *Host, channel *store.Channel, start []byte, onRecv, onPublish entryHandler) (*TopicHandler, error) {
+	uri := channel.URI()
+	topic, err := h.pubsub.Join(uri)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("could not join channel %q: %w", uri, err)
 	}
 
 	subOpts := []pubsub.SubOpt{}
 	sub, err := topic.Subscribe(subOpts...)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("could not subscribe to channel %q: %w", uri, err)
 	}
 	ctx, cancel := context.WithCancel(h.ctx)
 
-	// TODO: restore our topic pointer so we don't have to re-publish
-	// everything!
-
 	th := &TopicHandler{
-		h:         h,
-		id:        helpers.NewUUID(),
-		channel:   channel,
-		topic:     topic,
-		sub:       sub,
-		ctx:       ctx,
-		cancel:    cancel,
-		onReceive: onRecv,
-		onPublish: onPublish,
+		h:           h,
+		id:          helpers.NewUUID(),
+		channel:     channel,
+		topic:       topic,
+		sub:         sub,
+		ctx:         ctx,
+		cancel:      cancel,
+		onReceive:   onRecv,
+		onPublish:   onPublish,
+		lastEntryID: start,
 	}
 	return th, nil
 }
 
 func (th *TopicHandler) watchTopic() {
-
+	if th == nil {
+		panic("wtf") // TODO: now what?
+	}
 	opts := &store.StreamOpts{Seek: th.lastEntryID, Max: store.Tail}
 	th.channel.Subscribe(th.ctx, th, opts)
 
@@ -101,9 +100,6 @@ func (th *TopicHandler) Publish(entry *pb.Msg) {
 	}
 	th.topic.Publish(th.ctx, body, opts...)
 	th.onPublish(entry)
-
-	th.lock.Lock()
-	defer th.lock.Unlock()
 	th.lastEntryID = entry.GetEntryHeader().GetEntryID()
 }
 
