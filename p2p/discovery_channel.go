@@ -8,6 +8,7 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	"github.com/plan-systems/plan-vault-libp2p/helpers"
+	"github.com/plan-systems/plan-vault-libp2p/keyring"
 	pb "github.com/plan-systems/plan-vault-libp2p/protos"
 	"github.com/plan-systems/plan-vault-libp2p/store"
 )
@@ -88,7 +89,9 @@ func handleDiscoveryUpsert(h *Host, update *pb.Peer) error {
 		return err
 	}
 
-	// TODO: we have to add their key to the keyring too!
-	// update.Key
+	// save the public key in the keyring for verifying entries
+	h.keyring.AddMemberKey(h.discoveryURI,
+		keyring.MemberIDFromString(string(addrInfo.ID)),
+		keyring.MemberPublicKeyFromBytes(update.Key))
 	return nil
 }

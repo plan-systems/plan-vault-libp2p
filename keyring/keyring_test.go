@@ -1,10 +1,9 @@
-package pnode
+package keyring
 
 import (
 	crand "crypto/rand"
 	"testing"
 
-	"github.com/libp2p/go-libp2p-core/crypto"
 	"github.com/stretchr/testify/require"
 )
 
@@ -55,14 +54,11 @@ func testKeyRing(uris ...string) *KeyRing {
 		crand.Read(mID[:])
 		crand.Read(mID2[:])
 
+		kr.identity = priv
 		kr.AddCommunityKey(uri, CommunityKey(&cKey))
 		kr.AddKeyPair(uri, MemberID(mID),
 			MemberPublicKey(&myPubKey), MemberPrivateKey(&myPrivKey))
 		kr.AddMemberKey(uri, MemberID(mID2), MemberPublicKey(&mPubKey))
 	}
 	return kr
-}
-
-func generateKey() (crypto.PrivKey, crypto.PubKey, error) {
-	return crypto.GenerateKeyPair(crypto.Ed25519, -1)
 }

@@ -1,4 +1,4 @@
-package p2p
+package keyring
 
 import (
 	"errors"
@@ -9,15 +9,40 @@ import (
 	"github.com/libp2p/go-libp2p-core/crypto"
 )
 
-// inMemory lets us configure keys for testing that live in memory and
+// InMemory lets us configure keys for testing that live in memory and
 // get thrown out once we're done with them
-const inMemory = ":memory:"
+const InMemory = ":memory:"
+
+func restore(kr *KeyRing, uri, path string) error {
+
+	cpriv, cpub, err := getKeys(path)
+	if err != nil {
+		return err
+	}
+	pub, err := MemberPublicKeyFromP2PKey(cpub)
+	if err != nil {
+		return err
+	}
+	priv, err := MemberPrivateKeyFromP2PKey(cpriv)
+	if err != nil {
+		return err
+	}
+	id, err := MemberIDFromP2PPubKey(cpub)
+	if err != nil {
+		return err
+	}
+	kr.identity = cpriv
+	kr.AddKeyPair(uri, id, pub, priv)
+
+	return nil
+
+}
 
 // getKeys returns a public/private keypair from the path on disk, or
 // creates one at that path if one does not exist
 func getKeys(path string) (crypto.PrivKey, crypto.PubKey, error) {
 
-	if path == inMemory {
+	if path == InMemory {
 		return generateKey()
 	}
 
@@ -36,7 +61,7 @@ func getKeys(path string) (crypto.PrivKey, crypto.PubKey, error) {
 	if err != nil {
 		return nil, nil, err
 	}
-	err = saveKey(priv, *keyFile)
+	err = saveKey(priv, path)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -96,8 +121,5 @@ func decodeKey(encoded string) (crypto.PrivKey, error) {
 }
 
 func generateKey() (crypto.PrivKey, crypto.PubKey, error) {
-	return crypto.GenerateKeyPair(
-		crypto.Ed25519, // Select your key type. Ed25519 are nice short
-		-1,             // Select key length when possible (i.e. RSA).
-	)
+	return crypto.GenerateKeyPair(crypto.Ed25519, -1)
 }

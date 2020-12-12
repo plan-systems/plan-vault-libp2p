@@ -16,7 +16,7 @@ import (
 	libp2ptls "github.com/libp2p/go-libp2p-tls"
 	maddr "github.com/multiformats/go-multiaddr"
 
-	"github.com/plan-systems/plan-vault-libp2p/pnode"
+	"github.com/plan-systems/plan-vault-libp2p/keyring"
 	pb "github.com/plan-systems/plan-vault-libp2p/protos"
 	"github.com/plan-systems/plan-vault-libp2p/store"
 )
@@ -25,17 +25,16 @@ const snapshotInterval = time.Second * 30
 
 type Host struct {
 	host.Host
-	store   *store.Store
-	pubsub  *pubsub.PubSub
-	ctx     context.Context
-	keyring *pnode.KeyRing
+	store        *store.Store
+	pubsub       *pubsub.PubSub
+	keyring      *keyring.KeyRing
+	handlers     map[string]*TopicHandler
+	discoveryURI string
 
-	lock sync.RWMutex
-
+	ctx              context.Context
+	lock             sync.RWMutex
 	snapshotUpdateCh chan struct{}
 	readyCh          chan error
-	handlers         map[string]*TopicHandler
-	discoveryURI     string
 }
 
 func New(ctx context.Context, db *store.Store, cfg Config) (*Host, error) {
@@ -44,10 +43,11 @@ func New(ctx context.Context, db *store.Store, cfg Config) (*Host, error) {
 		return nil, nil
 	}
 
-	priv, _, err := getKeys(cfg.KeyFile)
+	kr, err := keyring.NewFromFile(cfg.DiscoveryChannelURI, cfg.KeyFile)
 	if err != nil {
 		return nil, err
 	}
+	priv := kr.GetIdentityKey()
 
 	// TODO: move all configuration values into Config
 	tcpAddr := fmt.Sprintf("/ip4/0.0.0.0/tcp/%d", cfg.Port)
@@ -79,11 +79,12 @@ func New(ctx context.Context, db *store.Store, cfg Config) (*Host, error) {
 		Host:             h,
 		store:            db,
 		pubsub:           p,
+		keyring:          kr,
 		handlers:         map[string]*TopicHandler{},
+		discoveryURI:     cfg.DiscoveryChannelURI,
 		ctx:              ctx,
 		snapshotUpdateCh: make(chan struct{}),
 		readyCh:          make(chan error),
-		discoveryURI:     cfg.DiscoveryChannelURI,
 	}
 
 	if !cfg.NoMDNS {
