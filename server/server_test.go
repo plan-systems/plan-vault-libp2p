@@ -46,6 +46,13 @@ func TestServer_NewOpenClose(t *testing.T) {
 	ent1 := helpers.NewEntry(t.Name())
 	ent1.EntryHeader.FeedURI = t.Name()
 
+	// TODO: with GOMAXPROCS=1 the OpenFeed may not get a chance to
+	// set up the badger Subscribe before we send this, so we can end
+	// up dropping the notification. For now we'll just sleep for this
+	// test and come back later to see if we can make the Subscribe
+	// synchronous
+	time.Sleep(200 * time.Millisecond)
+
 	session.clientSend(&pb.FeedReq{
 		ReqOp:    pb.ReqOp_ChannelGenesis,
 		ReqID:    8,
