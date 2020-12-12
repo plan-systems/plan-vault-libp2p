@@ -79,6 +79,7 @@ const (
 var (
 	ErrorInvalidEntryID = errors.New("invalid entry ID")
 	ErrorKeyExists      = errors.New("entry ID already exists")
+	ErrorKeyNotFound    = errors.New("key not found")
 )
 
 type ChannelID = [32]byte
@@ -146,6 +147,41 @@ func (s *Store) Channel(id ChannelID) (*Channel, error) {
 	}
 	channel.watch()
 	return channel, nil
+}
+
+// Get accesses a key directly, implemented for p2p snapshot and
+// restore, as well as debugging and testing.
+func (s *Store) Get(key StoreKey) (*pb.Msg, error) {
+	msg := &pb.Msg{}
+	err := s.db.View(func(txn *badger.Txn) error {
+		item, err := txn.Get(key)
+		if err != nil {
+			if errors.Is(err, badger.ErrKeyNotFound) {
+				return ErrorKeyNotFound
+			}
+			return err
+		}
+		err = item.Value(func(val []byte) error {
+			return proto.Unmarshal(val, msg)
+		})
+		return err
+	})
+	return msg, err
+}
+
+// Upsert writes an entry directly, implemented for p2p snapshot and
+// restore, as well as debugging and testing. It does not write into
+// the index. The caller is responsible for anything it cares about in
+// the EntryHeader.
+func (s *Store) Upsert(key StoreKey, entry *pb.Msg) error {
+	m, err := proto.Marshal(entry)
+	if err != nil {
+		return err
+	}
+	return s.db.Update(func(txn *badger.Txn) error {
+		ent := badger.NewEntry(key, m)
+		return txn.SetEntry(ent)
+	})
 }
 
 // Channel is an abstraction around the Store that tracks state for subscribers
@@ -316,21 +352,10 @@ func (c *Channel) firstKey() StoreKey {
 	return k
 }
 
-// get accesses a key directly, implemented mostly for debugging and
-// testing purposes
+// Get accesses a key directly, implemented for p2p snapshot and
+// restore, as well as debugging and testing.
 func (c *Channel) Get(key StoreKey) (*pb.Msg, error) {
-	msg := &pb.Msg{}
-	err := c.store.db.View(func(txn *badger.Txn) error {
-		item, err := txn.Get(key)
-		if err != nil {
-			return err
-		}
-		err = item.Value(func(val []byte) error {
-			return proto.Unmarshal(val, msg)
-		})
-		return err
-	})
-	return msg, err
+	return c.store.Get(key)
 }
 
 // Subscribe sets up a subscription that will fire the target's Publish

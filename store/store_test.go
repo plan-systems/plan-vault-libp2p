@@ -278,7 +278,7 @@ func TestStore_Subscribe_ResetConcurrentAppends(t *testing.T) {
 
 	_, err = channel.Get(channel.entryKeyFromIndex(idx4))
 	require.Error(err)
-	require.EqualError(err, badger.ErrKeyNotFound.Error())
+	require.EqualError(err, ErrorKeyNotFound.Error())
 
 	// get the messages in the expected order, prior to reset
 	require.Equal(id(ent2), id(sub.received[0]))

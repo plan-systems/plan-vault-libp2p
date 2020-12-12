@@ -2,6 +2,7 @@ package p2p
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sync"
 	"time"
@@ -15,13 +16,15 @@ import (
 	libp2pquic "github.com/libp2p/go-libp2p-quic-transport"
 	libp2ptls "github.com/libp2p/go-libp2p-tls"
 	maddr "github.com/multiformats/go-multiaddr"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/plan-systems/plan-vault-libp2p/keyring"
 	pb "github.com/plan-systems/plan-vault-libp2p/protos"
 	"github.com/plan-systems/plan-vault-libp2p/store"
 )
 
-const snapshotInterval = time.Second * 30
+var snapshotInterval = time.Second * 30 // TODO: make this configurable
+var snapshotKey = []byte{0x51, 0x90}    // magic prefix TODO: make this configurable
 
 type Host struct {
 	host.Host
@@ -96,7 +99,7 @@ func New(ctx context.Context, db *store.Store, cfg Config) (*Host, error) {
 
 	disc, err := NewChannelDiscovery(ctx, host, &cfg)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("could not configure channel discovery: %w", err)
 	}
 
 	host.handlers[cfg.DiscoveryChannelURI] = disc
@@ -104,7 +107,7 @@ func New(ctx context.Context, db *store.Store, cfg Config) (*Host, error) {
 
 	err = <-host.readyCh
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("could not start p2p topic monitoring: %w", err)
 	}
 
 	return host, nil
@@ -114,7 +117,7 @@ func (h *Host) watchTopics() {
 
 	err := h.restore()
 	if err != nil {
-		h.readyCh <- err
+		h.readyCh <- fmt.Errorf("failed to restore from disk: %w", err)
 	}
 
 	// note that we need to call watchTopics before starting the server
@@ -223,7 +226,12 @@ func (h *Host) takeSnapshot() (*pb.PubsubState, error) {
 }
 
 func (h *Host) writeSnapshot(snap *pb.PubsubState) error {
-	return nil // TODO
+	body, err := proto.Marshal(snap)
+	if err != nil {
+		return err
+	}
+	entry := &pb.Msg{Body: body}
+	return h.store.Upsert(snapshotKey, entry)
 }
 
 func (h *Host) restore() error {
@@ -251,7 +259,21 @@ func (h *Host) restore() error {
 }
 
 func (h *Host) readSnapshot() (*pb.PubsubState, error) {
-	return &pb.PubsubState{}, nil // TODO
+	snap := &pb.PubsubState{}
+	entry, err := h.store.Get(snapshotKey)
+	if err != nil {
+		if errors.Is(err, store.ErrorKeyNotFound) {
+			return snap, nil // no previous snapshot
+		} else {
+			return nil, err
+		}
+	}
+
+	err = proto.Unmarshal(entry.GetBody(), snap)
+	if err != nil {
+		return nil, err
+	}
+	return snap, nil
 }
 
 func encodePeer(peerID libpeer.ID, pubkey crypto.PubKey, ma []maddr.Multiaddr) (*pb.Peer, error) {
