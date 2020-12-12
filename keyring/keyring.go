@@ -1,7 +1,7 @@
-package pnode
+package keyring
 
 /*
-The `pnode` package is a standalone implementation of the PLAN
+The `keyring` package is a standalone implementation of the PLAN
 client/pnode protocol embeded in the vault, but intended to be
 pulled out as a freestanding library that can be consumed by the
 actual client and pnode application
@@ -9,9 +9,9 @@ actual client and pnode application
 
 import (
 	crand "crypto/rand"
-	"errors"
 	"sync"
 
+	"github.com/libp2p/go-libp2p-core/crypto"
 	"golang.org/x/crypto/nacl/secretbox"
 	"golang.org/x/crypto/nacl/sign"
 
@@ -19,22 +19,8 @@ import (
 	pb "github.com/plan-systems/plan-vault-libp2p/protos"
 )
 
-var (
-	ErrorDecryptFailedAsym = errors.New("assymmetric decryption failed")
-	ErrorDecryptFailedSym  = errors.New("symmetric decryption failed")
-	ErrorInvalidSignature  = errors.New("invalid or missing signature")
-	ErrorUnknownChannel    = errors.New("unknown channel")
-	ErrorUnknownKey        = errors.New("unknown key")
-)
-
-const saltLen = 24
-
-type CommunityKey *[32]byte
-type MemberPublicKey *[32]byte
-type MemberPrivateKey *[64]byte
-type MemberID [20]byte
-
 type KeyRing struct {
+	identity    crypto.PrivKey
 	channelKeys map[string]*KeySet
 	lock        sync.RWMutex
 }
@@ -43,6 +29,15 @@ func NewKeyRing() *KeyRing {
 	return &KeyRing{
 		channelKeys: map[string]*KeySet{},
 	}
+}
+
+func NewFromFile(uri, path string) (*KeyRing, error) {
+	kr := NewKeyRing()
+	err := restore(kr, uri, path)
+	if err != nil {
+		return nil, err
+	}
+	return kr, nil
 }
 
 // AddCommunityKey adds a community key to the channel keyring.
@@ -72,6 +67,12 @@ func (kr *KeyRing) AddKeyPair(channelURI string, id MemberID, pub MemberPublicKe
 	ks.PublicKey = pub
 	ks.MemberID = id
 	ks.setMemberKey(id, pub)
+}
+
+// GetIdentityKey gets the keyring's encoded identity key and returns
+// it as a libp2p private key
+func (kr *KeyRing) GetIdentityKey() crypto.PrivKey {
+	return kr.identity
 }
 
 // AddMemberKey adds a different member's public key to the keyring,
