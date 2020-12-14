@@ -415,8 +415,9 @@ func setup(t *testing.T) (*Channel, context.Context, func()) {
 	return channel, ctx, cancel
 }
 
-func testConfig() Config {
-	cfg := DefaultConfig()
+func testConfig() *Config {
+	cfg := DevConfig()
+	cfg.HasDiscovery = false
 	cfg.DB = cfg.DB.
 		WithDir("").                     // need to unset for in-memory
 		WithValueDir("").                // need to unset for in-memory

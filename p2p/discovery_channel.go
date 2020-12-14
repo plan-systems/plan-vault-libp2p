@@ -14,7 +14,7 @@ import (
 )
 
 func NewChannelDiscovery(pctx context.Context, h *Host, cfg *Config) (*TopicHandler, error) {
-	channelID := helpers.ChannelURItoChannelID(cfg.DiscoveryChannelURI)
+	channelID := helpers.ChannelURItoChannelID(cfg.URI)
 	channel, err := h.store.Channel(channelID)
 	if err != nil {
 		return nil, err

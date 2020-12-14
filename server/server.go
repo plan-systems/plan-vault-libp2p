@@ -5,13 +5,13 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log"
 	"net"
 	"sync"
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
 
+	"github.com/apex/log"
 	"github.com/plan-systems/plan-vault-libp2p/helpers"
 	pb "github.com/plan-systems/plan-vault-libp2p/protos"
 	"github.com/plan-systems/plan-vault-libp2p/store"
@@ -29,17 +29,17 @@ var (
 	ErrorInvalidUnsupportedOp = errors.New("unsupported operation")
 )
 
-func Run(ctx context.Context, db *store.Store) {
-	listener, err := net.Listen("tcp", fmt.Sprintf("%s:%d", *grpcAddr, *grpcPort))
+func Run(ctx context.Context, db *store.Store, cfg *Config) {
+	listener, err := net.Listen("tcp", fmt.Sprintf("%s:%d", cfg.Addr, cfg.Port))
 	if err != nil {
-		log.Fatalf("failed to set up listener: %v", err)
+		cfg.Log.Fatalf("failed to set up listener: %v", err)
 	}
 
 	var opts []grpc.ServerOption
-	if *tls {
-		creds, err := credentials.NewServerTLSFromFile(*certFile, *certKeyFile)
+	if cfg.TLSCertPath != "" && cfg.TLSKeyPath != "" {
+		creds, err := credentials.NewServerTLSFromFile(cfg.TLSCertPath, cfg.TLSKeyPath)
 		if err != nil {
-			log.Fatalf("failed to generate tls creds: %v", err)
+			cfg.Log.Fatalf("failed to generate tls creds: %v", err)
 		}
 		opts = []grpc.ServerOption{grpc.Creds(creds)}
 	}
@@ -47,7 +47,7 @@ func Run(ctx context.Context, db *store.Store) {
 	// TODO: look thru the options to thread a context thru here
 	grpcServer := grpc.NewServer(opts...)
 
-	vaultSrv := &VaultServer{ctx: ctx, db: db}
+	vaultSrv := &VaultServer{ctx: ctx, db: db, log: cfg.Log}
 	pb.RegisterVaultGrpcServer(grpcServer, vaultSrv)
 	grpcServer.Serve(listener)
 }
@@ -57,6 +57,7 @@ type VaultServer struct {
 
 	ctx context.Context
 	db  *store.Store
+	log *log.Entry
 }
 
 func (v *VaultServer) VaultSession(session pb.VaultGrpc_VaultSessionServer) error {
@@ -91,8 +92,7 @@ func (v *VaultServer) VaultSession(session pb.VaultGrpc_VaultSessionServer) erro
 			}
 
 			if err != nil {
-				// TODO: do something better here
-				log.Fatalf("send failed: %v", err)
+				v.log.Errorf("send failed: %v", err)
 			}
 		}
 	}
@@ -111,20 +111,20 @@ func (v *VaultServer) open(conn *Connection, req *pb.FeedReq) *pb.Msg {
 	reqID := req.GetReqID()
 	openReq := req.GetOpenFeed()
 	if openReq == nil {
-		return errorResponse(reqID,
+		return v.errorResponse(reqID,
 			pb.ErrCode_InvalidRequest, ErrorInvalidOpenReq)
 
 	}
 	uri := openReq.GetFeedURI()
 	if uri == "" {
-		return errorResponse(reqID,
+		return v.errorResponse(reqID,
 			pb.ErrCode_InvalidFeedURI, ErrorInvalidFeedURI)
 	}
 
 	channelID := helpers.ChannelURItoChannelID(uri)
 	channel, err := v.db.Channel(channelID)
 	if err != nil {
-		return errorResponse(reqID, pb.ErrCode_DatabaseError, err)
+		return v.errorResponse(reqID, pb.ErrCode_DatabaseError, err)
 	}
 	opts := newStreamOpts(req.GetOpenFeed())
 
@@ -276,23 +276,23 @@ func (v *VaultServer) append(req *pb.FeedReq) *pb.Msg {
 	header := entry.GetEntryHeader()
 	uri := header.GetFeedURI()
 	if uri == "" {
-		return errorResponse(reqID, pb.ErrCode_InvalidFeedURI,
+		return v.errorResponse(reqID, pb.ErrCode_InvalidFeedURI,
 			ErrorInvalidFeedURI)
 	}
 	body := entry.GetBody()
 	if len(body) == 0 || len(body) > maxBodySize {
-		return errorResponse(reqID, pb.ErrCode_InvalidRequest,
+		return v.errorResponse(reqID, pb.ErrCode_InvalidRequest,
 			ErrorInvalidEntryBody)
 
 	}
 	channelID := helpers.ChannelURItoChannelID(uri)
 	channel, err := v.db.Channel(channelID)
 	if err != nil {
-		return errorResponse(reqID, pb.ErrCode_DatabaseError, err)
+		return v.errorResponse(reqID, pb.ErrCode_DatabaseError, err)
 	}
 	key, err := channel.Append(entry)
 	if err != nil {
-		return errorResponse(reqID, pb.ErrCode_DatabaseError, err)
+		return v.errorResponse(reqID, pb.ErrCode_DatabaseError, err)
 	}
 
 	resp := &pb.Msg{
@@ -304,12 +304,12 @@ func (v *VaultServer) append(req *pb.FeedReq) *pb.Msg {
 }
 
 func (v *VaultServer) unsupported(req *pb.FeedReq) *pb.Msg {
-	return errorResponse(req.GetReqID(),
+	return v.errorResponse(req.GetReqID(),
 		pb.ErrCode_InvalidRequest, ErrorInvalidUnsupportedOp)
 }
 
-func errorResponse(reqID int32, code pb.ErrCode, err error) *pb.Msg {
-	log.Printf("error: %v", err)
+func (v *VaultServer) errorResponse(reqID int32, code pb.ErrCode, err error) *pb.Msg {
+	v.log.Error(err.Error())
 	resp := &pb.Msg{
 		Op:    pb.MsgOp_ReqDiscarded,
 		ReqID: reqID,

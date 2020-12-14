@@ -40,21 +40,22 @@ type Host struct {
 	readyCh          chan error
 }
 
-func New(ctx context.Context, db *store.Store, cfg Config) (*Host, error) {
+func New(ctx context.Context, db *store.Store, cfg *Config) (*Host, error) {
 
-	if cfg.NoP2P { // standalone vault
+	if cfg.URI == "" { // standalone vault
 		return nil, nil
 	}
 
-	kr, err := keyring.NewFromFile(cfg.DiscoveryChannelURI, cfg.KeyFile)
+	kr, err := keyring.NewFromFile(cfg.URI, cfg.KeyFile)
 	if err != nil {
 		return nil, err
 	}
 	priv := kr.GetIdentityKey()
 
-	// TODO: move all configuration values into Config
-	tcpAddr := fmt.Sprintf("/ip4/0.0.0.0/tcp/%d", cfg.Port)
-	quicAddr := fmt.Sprintf("/ip4/0.0.0.0/udp/%d/quic", cfg.Port)
+	// TODO: there's probably some nice multiaddr handling we could
+	// use here to make this IPv6 friendly
+	tcpAddr := fmt.Sprintf("/ip4/%s/tcp/%d", cfg.TCPAddr, cfg.TCPPort)
+	quicAddr := fmt.Sprintf("/ip4/%s/udp/%d/quic", cfg.QUICAddr, cfg.QUICPort)
 
 	h, err := libp2p.New(ctx,
 		libp2p.Identity(priv),
@@ -84,25 +85,25 @@ func New(ctx context.Context, db *store.Store, cfg Config) (*Host, error) {
 		pubsub:           p,
 		keyring:          kr,
 		handlers:         map[string]*TopicHandler{},
-		discoveryURI:     cfg.DiscoveryChannelURI,
+		discoveryURI:     cfg.URI,
 		ctx:              ctx,
 		snapshotUpdateCh: make(chan struct{}),
 		readyCh:          make(chan error),
 	}
 
-	if !cfg.NoMDNS {
+	if cfg.MDNS {
 		err = setupDiscoverymDNS(ctx, host)
 		if err != nil {
 			return nil, err
 		}
 	}
 
-	disc, err := NewChannelDiscovery(ctx, host, &cfg)
+	disc, err := NewChannelDiscovery(ctx, host, cfg)
 	if err != nil {
 		return nil, fmt.Errorf("could not configure channel discovery: %w", err)
 	}
 
-	host.handlers[cfg.DiscoveryChannelURI] = disc
+	host.handlers[cfg.URI] = disc
 	go host.watchTopics()
 
 	err = <-host.readyCh

@@ -1,27 +1,33 @@
 package p2p
 
-import "flag"
-
-// TODO: improve the configuration story here
-var (
-	port    = flag.Int("p2p_port", 9000, "p2p server port port")
-	keyFile = flag.String("key_file", "/tmp/vault.key", "path to key file")
+import (
+	"github.com/apex/log"
 )
 
 type Config struct {
-	NoP2P               bool
-	NoMDNS              bool
-	DiscoveryChannelURI string
-	Port                int
-	KeyFile             string
+	MDNS     bool
+	URI      string
+	TCPAddr  string
+	TCPPort  int
+	QUICAddr string
+	QUICPort int
+	KeyFile  string
+	Log      *log.Entry
 }
 
-func DefaultConfig() Config {
+// Init overrides the configuration values of the Config object with
+// those passed in as flags
+func (cfg *Config) Init() {}
+
+func DevConfig() Config {
 	return Config{
-		NoP2P:               false,
-		NoMDNS:              false,
-		DiscoveryChannelURI: "/TODO",
-		Port:                *port,
-		KeyFile:             *keyFile,
+		MDNS:     true,
+		URI:      "/DISCOVERY",
+		TCPAddr:  "127.0.0.1",
+		TCPPort:  9051,
+		QUICAddr: "127.0.0.1",
+		QUICPort: 9051,
+		KeyFile:  "/tmp/vault.key",
+		Log:      log.WithFields(log.Fields{"service": "p2p"}),
 	}
 }
