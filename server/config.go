@@ -1,18 +1,33 @@
 package server
 
 import (
-	"flag"
+	"path/filepath"
 
+	"github.com/apex/log"
 	pb "github.com/plan-systems/plan-vault-libp2p/protos"
 )
 
 var defaultPort = int(pb.Const_DefaultGrpcServicePort)
 
-// TODO: improve the configuration story here
-var (
-	tls         = flag.Bool("tls", false, "Connection uses TLS if true, else plain TCP")
-	certFile    = flag.String("cert_file", "x509/server_cert.pem", "The TLS cert file")
-	certKeyFile = flag.String("cert_key_file", "x509/server_key.pem", "The TLS key file")
-	grpcAddr    = flag.String("addr", "127.0.0.1", "gRPC server address")
-	grpcPort    = flag.Int("port", defaultPort, "gRPC server port port")
-)
+type Config struct {
+	Addr        string
+	Port        int
+	TLSCertPath string
+	TLSKeyPath  string
+	Log         *log.Entry
+}
+
+// Init overrides the configuration values of the Config object with
+// those passed in as flags
+func (cfg *Config) Init() {}
+
+func DevConfig() *Config {
+	baseDir := "/tmp"
+	return &Config{
+		Addr:        "127.0.0.1",
+		Port:        defaultPort,
+		TLSCertPath: filepath.Join(baseDir, "vault_cert.pem"),
+		TLSKeyPath:  filepath.Join(baseDir, "vault_key.pem"),
+		Log:         log.WithFields(log.Fields{"service": "grpc"}),
+	}
+}

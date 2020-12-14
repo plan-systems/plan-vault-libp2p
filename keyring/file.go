@@ -69,11 +69,7 @@ func getKeys(path string) (crypto.PrivKey, crypto.PubKey, error) {
 }
 
 func loadKey(path string) (crypto.PrivKey, error) {
-	file, err := os.Open(path)
-	if err != nil {
-		return nil, err
-	}
-	b, err := ioutil.ReadAll(file)
+	b, err := ioutil.ReadFile(path)
 	if err != nil {
 		return nil, err
 	}

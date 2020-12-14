@@ -86,7 +86,7 @@ type ChannelID = [32]byte
 type StoreKey = []byte
 type ArrivalKey = []byte
 
-func New(ctx context.Context, cfg Config) (*Store, error) {
+func New(ctx context.Context, cfg *Config) (*Store, error) {
 
 	db, err := badger.Open(cfg.DB)
 	if err != nil {

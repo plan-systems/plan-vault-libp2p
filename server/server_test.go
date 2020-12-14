@@ -23,7 +23,7 @@ func TestServer_NewOpenClose(t *testing.T) {
 	defer cancel()
 	db := dbSetup(t, ctx)
 
-	server := &VaultServer{ctx: ctx, db: db}
+	server := &VaultServer{ctx: ctx, db: db, log: DevConfig().Log}
 
 	session := newMockSessionServer(ctx)
 	go server.VaultSession(session)
@@ -122,7 +122,7 @@ func TestServer_StreamAppend(t *testing.T) {
 	defer cancel()
 	db := dbSetup(t, ctx)
 
-	server := &VaultServer{ctx: ctx, db: db}
+	server := &VaultServer{ctx: ctx, db: db, log: DevConfig().Log}
 
 	session := newMockSessionServer(ctx)
 	go server.VaultSession(session)
@@ -157,7 +157,7 @@ func TestServer_InvalidRequests(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	server := &VaultServer{ctx: ctx}
+	server := &VaultServer{ctx: ctx, log: DevConfig().Log}
 	session := newMockSessionServer(ctx)
 	go server.VaultSession(session)
 
@@ -374,8 +374,8 @@ func dbSetup(t *testing.T, ctx context.Context) *store.Store {
 	return store
 }
 
-func testConfig() store.Config {
-	cfg := store.DefaultConfig()
+func testConfig() *store.Config {
+	cfg := store.DevConfig()
 	cfg.DB = cfg.DB.
 		WithDir("").                     // need to unset for in-memory
 		WithValueDir("").                // need to unset for in-memory
