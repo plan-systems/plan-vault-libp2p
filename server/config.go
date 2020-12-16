@@ -12,6 +12,7 @@ var defaultPort = int(pb.Const_DefaultGrpcServicePort)
 type Config struct {
 	Addr        string
 	Port        int
+	Insecure    bool
 	TLSCertPath string
 	TLSKeyPath  string
 	Log         *log.Entry
@@ -26,6 +27,7 @@ func DevConfig() *Config {
 	return &Config{
 		Addr:        "127.0.0.1",
 		Port:        defaultPort,
+		Insecure:    true,
 		TLSCertPath: filepath.Join(baseDir, "vault_cert.pem"),
 		TLSKeyPath:  filepath.Join(baseDir, "vault_key.pem"),
 		Log:         log.WithFields(log.Fields{"service": "grpc"}),
