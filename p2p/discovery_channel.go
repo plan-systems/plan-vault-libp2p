@@ -82,10 +82,6 @@ func handleDiscoveryUpsert(h *Host, update *pb.Peer) error {
 	defer cancel()
 	err = h.Connect(ctx, addrInfo)
 	if err != nil {
-		// TODO: we should exponentially back off but how do we get a
-		// notification that the peer is live again? should we write
-		// an entry that it was gone?
-		fmt.Println("now what?")
 		return err
 	}
 
