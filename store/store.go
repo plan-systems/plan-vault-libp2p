@@ -118,7 +118,6 @@ func (s *Store) ChannelUpdates() chan *Channel {
 // Channel creates a new channel and starts its watcher, or returns
 // one we've registered previously.
 func (s *Store) Channel(id ChannelID) (*Channel, error) {
-
 	s.lock.Lock()
 	defer s.lock.Unlock()
 

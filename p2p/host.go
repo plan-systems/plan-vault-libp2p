@@ -107,9 +107,7 @@ func New(ctx context.Context, db *store.Store, cfg *Config) (*Host, error) {
 	}
 
 	host.handlers[cfg.URI] = disc
-	go host.watchTopics()
-
-	err = <-host.readyCh
+	err = host.watchTopics()
 	if err != nil {
 		return nil, fmt.Errorf("could not start p2p topic monitoring: %w", err)
 	}
@@ -117,12 +115,7 @@ func New(ctx context.Context, db *store.Store, cfg *Config) (*Host, error) {
 	return host, nil
 }
 
-func (h *Host) watchTopics() {
-
-	err := h.restore()
-	if err != nil {
-		h.readyCh <- fmt.Errorf("failed to restore from disk: %w", err)
-	}
+func (h *Host) watchTopics() error {
 
 	// note that we need to call watchTopics before starting the server
 	// in main so that we can't race with the creation of new topics.
@@ -130,35 +123,44 @@ func (h *Host) watchTopics() {
 	// TODO: this is going to make gracefully restarting the host
 	// painful if we have config updates.
 	updates := h.store.ChannelUpdates()
-	ticker := time.NewTicker(snapshotInterval)
-	defer ticker.Stop()
 
-	var dirty bool
+	go func() {
 
-	h.readyCh <- nil
+		ticker := time.NewTicker(snapshotInterval)
+		defer ticker.Stop()
 
-	for {
-		select {
-		case channel := <-updates:
-			if channel != nil {
-				go h.joinChannel(channel, []byte{})
+		var dirty bool
+
+		for {
+			select {
+			case channel := <-updates:
+				if channel != nil {
+					go h.joinChannel(channel, []byte{})
+				}
+			case <-h.snapshotUpdateCh:
+				// note: because we snapshot in the same select, this is
+				// going to block updates to the topicHandler's
+				// lastEntrySeen, but that should also prevent us from
+				// having to lock all the topicHandlers at the same time
+				// TODO: need to test this to verify
+				dirty = true
+			case <-ticker.C:
+				err := h.snapshot(dirty)
+				if err == nil {
+					dirty = false
+				}
+			case <-h.ctx.Done():
+				return
 			}
-		case <-h.snapshotUpdateCh:
-			// note: because we snapshot in the same select, this is
-			// going to block updates to the topicHandler's
-			// lastEntrySeen, but that should also prevent us from
-			// having to lock all the topicHandlers at the same time
-			// TODO: need to test this to verify
-			dirty = true
-		case <-ticker.C:
-			err := h.snapshot(dirty)
-			if err == nil {
-				dirty = false
-			}
-		case <-h.ctx.Done():
-			return
 		}
+	}()
+
+	err := h.restore()
+	if err != nil {
+		return fmt.Errorf("failed to restore from disk: %w", err)
 	}
+
+	return nil
 }
 
 func (h *Host) joinChannel(channel *store.Channel, start []byte) {
