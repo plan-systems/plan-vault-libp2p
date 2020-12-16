@@ -7,6 +7,7 @@ import (
 
 	"google.golang.org/protobuf/proto"
 
+	"github.com/apex/log"
 	"github.com/plan-systems/plan-vault-libp2p/helpers"
 	"github.com/plan-systems/plan-vault-libp2p/keyring"
 	pb "github.com/plan-systems/plan-vault-libp2p/protos"
@@ -30,6 +31,7 @@ func NewChannelDiscovery(pctx context.Context, h *Host, cfg *Config) (*TopicHand
 	if err != nil {
 		return nil, err
 	}
+	th.logger = h.log.WithFields(log.Fields{"service": "discovery"})
 
 	go th.watchTopic()
 	return th, nil

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/apex/log"
 	pubsub "github.com/libp2p/go-libp2p-pubsub"
 	"google.golang.org/protobuf/proto"
 
@@ -20,6 +21,7 @@ type TopicHandler struct {
 	sub     *pubsub.Subscription
 	ctx     context.Context
 	cancel  context.CancelFunc
+	logger  *log.Entry
 
 	onPublish entryHandler
 	onReceive entryHandler
@@ -44,10 +46,10 @@ func NewTopicHandler(h *Host, channel *store.Channel, start []byte, onRecv, onPu
 		return nil, fmt.Errorf("could not subscribe to channel %q: %w", uri, err)
 	}
 	ctx, cancel := context.WithCancel(h.ctx)
-
+	id := helpers.NewUUID()
 	th := &TopicHandler{
 		h:           h,
-		id:          helpers.NewUUID(),
+		id:          id,
 		channel:     channel,
 		topic:       topic,
 		sub:         sub,
@@ -56,21 +58,24 @@ func NewTopicHandler(h *Host, channel *store.Channel, start []byte, onRecv, onPu
 		onReceive:   onRecv,
 		onPublish:   onPublish,
 		lastEntryID: start,
+		logger: h.log.WithFields(log.Fields{
+			"id":  id,
+			"uri": uri,
+		}),
 	}
 	return th, nil
 }
 
 func (th *TopicHandler) watchTopic() {
-	if th == nil {
-		panic("wtf") // TODO: now what?
-	}
+
 	opts := &store.StreamOpts{Seek: th.lastEntryID, Max: store.Tail}
 	th.channel.Subscribe(th.ctx, th, opts)
 
 	for {
 		msg, err := th.sub.Next(th.ctx)
 		if err != nil {
-			fmt.Println(err) // TODO: now what?
+			th.logger.WithError(err).Error("failed to get next message from peer")
+			continue
 		}
 		if msg.ReceivedFrom == th.h.ID() {
 			continue
@@ -78,12 +83,14 @@ func (th *TopicHandler) watchTopic() {
 		entry := &pb.Msg{}
 		err = proto.Unmarshal(msg.GetData(), entry)
 		if err != nil {
-			fmt.Println(err) // TODO: now what?
+			th.logger.
+				WithFields(log.Fields{"peer": msg.ReceivedFrom}).
+				WithError(err).Error("failed to decode next message from peer")
 			continue
 		}
 		err = th.onReceive(entry)
 		if err != nil {
-			fmt.Println(err) // TODO: now what?
+			th.logger.WithError(err).Error("failed to handle message from peer")
 		}
 	}
 }
@@ -96,7 +103,7 @@ func (th *TopicHandler) Publish(entry *pb.Msg) {
 
 	body, err := proto.Marshal(entry)
 	if err != nil {
-		fmt.Println(err) // TODO: now what?
+		th.logger.WithError(err).Error("failed to encode new discovery entry")
 	}
 	th.topic.Publish(th.ctx, body, opts...)
 	th.onPublish(entry)

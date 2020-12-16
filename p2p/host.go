@@ -7,6 +7,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/apex/log"
 	"github.com/libp2p/go-libp2p"
 	connmgr "github.com/libp2p/go-libp2p-connmgr"
 	"github.com/libp2p/go-libp2p-core/crypto"
@@ -33,6 +34,7 @@ type Host struct {
 	keyring      *keyring.KeyRing
 	handlers     map[string]*TopicHandler
 	discoveryURI string
+	log          *log.Entry
 
 	ctx              context.Context
 	lock             sync.RWMutex
@@ -89,6 +91,7 @@ func New(ctx context.Context, db *store.Store, cfg *Config) (*Host, error) {
 		keyring:          kr,
 		handlers:         map[string]*TopicHandler{},
 		discoveryURI:     cfg.URI,
+		log:              cfg.Log,
 		ctx:              ctx,
 		snapshotUpdateCh: make(chan struct{}),
 		readyCh:          make(chan error),

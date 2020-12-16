@@ -7,9 +7,9 @@ package p2p
 
 import (
 	"context"
-	"fmt"
 	"time"
 
+	"github.com/apex/log"
 	"github.com/libp2p/go-libp2p-core/peer"
 	"github.com/libp2p/go-libp2p/p2p/discovery"
 )
@@ -23,19 +23,21 @@ const mDNSServiceTag = "plan-vault"
 
 // mDNSNotifee gets notified when we find a new peer via mDNS discovery
 type mDNSNotifee struct {
-	h *Host
+	h      *Host
+	logger *log.Entry
 }
 
 // HandlePeerFound connects to peers discovered via mDNS. Once they're
 // connected, the PubSub system will automatically start interacting
 // with them if they also support PubSub.
 func (n *mDNSNotifee) HandlePeerFound(pi peer.AddrInfo) {
-	// TODO: logging, not printing
 	ctx, cancel := context.WithTimeout(n.h.ctx, 10*time.Second)
 	defer cancel()
 	err := n.h.Connect(ctx, pi)
 	if err != nil {
-		fmt.Printf("error connecting to peer %s: %s\n", pi.ID.Pretty(), err)
+		n.logger.
+			WithFields(log.Fields{"peer": pi.ID.Pretty()}).
+			WithError(err).Error("failed to connect to peer")
 	}
 }
 
@@ -47,7 +49,10 @@ func setupDiscoverymDNS(ctx context.Context, h *Host) error {
 		return err
 	}
 
-	n := mDNSNotifee{h: h}
+	n := mDNSNotifee{
+		h:      h,
+		logger: h.log.WithFields(log.Fields{"service": "mDNS"}),
+	}
 	disc.RegisterNotifee(&n)
 	return nil
 }
