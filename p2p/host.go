@@ -57,6 +57,9 @@ func New(ctx context.Context, db *store.Store, cfg *Config) (*Host, error) {
 	tcpAddr := fmt.Sprintf("/ip4/%s/tcp/%d", cfg.TCPAddr, cfg.TCPPort)
 	quicAddr := fmt.Sprintf("/ip4/%s/udp/%d/quic", cfg.QUICAddr, cfg.QUICPort)
 
+	// TODO: how do we inject our own logger into the libp2p host?
+	// (or at least make sure it doesn't log itself?)
+
 	h, err := libp2p.New(ctx,
 		libp2p.Identity(priv),
 		libp2p.ListenAddrStrings(tcpAddr, quicAddr),

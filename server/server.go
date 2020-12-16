@@ -7,11 +7,13 @@ import (
 	"io"
 	"net"
 	"sync"
+	"time"
 
+	"github.com/apex/log"
+	metrics "github.com/armon/go-metrics"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
 
-	"github.com/apex/log"
 	"github.com/plan-systems/plan-vault-libp2p/helpers"
 	pb "github.com/plan-systems/plan-vault-libp2p/protos"
 	"github.com/plan-systems/plan-vault-libp2p/store"
@@ -36,7 +38,7 @@ func Run(ctx context.Context, db *store.Store, cfg *Config) {
 	}
 
 	var opts []grpc.ServerOption
-	if cfg.TLSCertPath != "" && cfg.TLSKeyPath != "" {
+	if !cfg.Insecure && cfg.TLSCertPath != "" && cfg.TLSKeyPath != "" {
 		creds, err := credentials.NewServerTLSFromFile(cfg.TLSCertPath, cfg.TLSKeyPath)
 		if err != nil {
 			cfg.Log.Fatalf("failed to generate tls creds: %v", err)
@@ -231,6 +233,9 @@ type Stream struct {
 // client
 func (s *Stream) Publish(msg *pb.Msg) {
 	msg.ReqID = s.id
+
+	metricsStart := time.Now()
+	defer metrics.MeasureSince([]string{"stream", "publish"}, metricsStart)
 	s.conn.Send(msg)
 }
 

@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	metrics "github.com/armon/go-metrics"
 	badger "github.com/dgraph-io/badger/v2"
 	"google.golang.org/protobuf/proto"
 
@@ -384,6 +385,7 @@ func (c *Channel) Subscribe(pctx context.Context, target SubscriptionTarget, opt
 	}
 
 	c.subscribers[sub.id] = sub
+	metrics.IncrCounter([]string{"channel", "subscribers"}, 1)
 
 	if opts.fromIndex() {
 		go sub.readFromIndex(opts)
@@ -555,6 +557,9 @@ func (sub *subscriber) read(opts *StreamOpts) error {
 							key = item.Key()
 							lastSeen = key
 							count++
+							metrics.IncrCounterWithLabels(
+								[]string{"channel", "publish"}, 1,
+								[]metrics.Label{{Name: "channelID", Value: sub.channel.uri}})
 							return nil
 						})
 						if err != nil {

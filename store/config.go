@@ -1,6 +1,8 @@
 package store
 
 import (
+	"strings"
+
 	"github.com/apex/log"
 	"github.com/dgraph-io/badger/v2"
 )
@@ -31,26 +33,27 @@ func DevConfig() *Config {
 	}
 }
 
-// BadgerLogger wraps the apex logger. The badger.Logger says it's
+// BadgerLogger wraps the our logger. The badger.Logger says it's
 // "implemented by any logging system that is used for standard logs"
-// but it turns out only klog implements their logs with this interface
-// and klog is still missing structured fields
+// but it turns out only klog implements their logs with this
+// interface and klog is still missing structured fields. And badger
+// adds newlines at the end of its lines for some reason
 type BadgerLogger struct {
 	logger *log.Entry
 }
 
 func (l BadgerLogger) Errorf(msg string, objs ...interface{}) {
-	l.logger.Errorf(msg, objs...)
+	l.logger.Errorf(strings.TrimSpace(msg), objs...)
 }
 
 func (l BadgerLogger) Warningf(msg string, objs ...interface{}) {
-	l.logger.Warnf(msg, objs...)
+	l.logger.Warnf(strings.TrimSpace(msg), objs...)
 }
 
 func (l BadgerLogger) Infof(msg string, objs ...interface{}) {
-	l.logger.Infof(msg, objs...)
+	l.logger.Infof(strings.TrimSpace(msg), objs...)
 }
 
 func (l BadgerLogger) Debugf(msg string, objs ...interface{}) {
-	l.logger.Debugf(msg, objs...)
+	l.logger.Debugf(strings.TrimSpace(msg), objs...)
 }

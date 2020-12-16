@@ -11,6 +11,7 @@ import (
 	"github.com/apex/log"
 	"github.com/mitchellh/go-homedir"
 
+	"github.com/plan-systems/plan-vault-libp2p/metrics"
 	"github.com/plan-systems/plan-vault-libp2p/p2p"
 	pb "github.com/plan-systems/plan-vault-libp2p/protos"
 	"github.com/plan-systems/plan-vault-libp2p/server"
@@ -41,11 +42,11 @@ func init() {
 }
 
 type configSource struct {
-	KeyDir  string         `json:"key_dir"`
+	KeyDir  string         `json:"keyring_dir"`
 	Store   *storeConfig   `json:"store"`
 	Server  *grpcConfig    `json:"server"`
 	P2P     *p2pConfig     `json:"p2p"`
-	Logging *loggingConfig `json:"logging"`
+	Metrics *metricsConfig `json:"debug"`
 }
 
 type storeConfig struct {
@@ -55,6 +56,7 @@ type storeConfig struct {
 type grpcConfig struct {
 	BindAddr string `json:"addr"`
 	Port     int    `json:"port"`
+	Insecure bool   `json:"insecure"`
 	TLSCert  string `json:"tls_cert_file"`
 	TLSKey   string `json:"tls_key_file"`
 }
@@ -62,15 +64,18 @@ type grpcConfig struct {
 type p2pConfig struct {
 	MDNS     bool   `json:"mdns"`
 	URI      string `json:"channel"`
-	TCPAddr  string `json:"tcp_addr"`
+	TCPAddr  string `json:"tcp_addr"` // TODO: switch these to multiaddr?
 	TCPPort  int    `json:"tcp_port"`
 	QUICAddr string `json:"quic_addr"`
 	QUICPort int    `json:"quic_port"`
 }
 
-// TODO: add formatting options here
-type loggingConfig struct {
-	Level string `json:"level"`
+type metricsConfig struct {
+	LogLevel     string `json:"log_level"`
+	LogFormat    string `json:"log_format"`
+	DebugAddr    string `json:"addr"`
+	DebugPort    int    `json:"port"`
+	DisableDebug bool   `json:"disable"`
 }
 
 func newConfigSource() *configSource {
@@ -117,21 +122,30 @@ func defaultConfigSrc() *configSource {
 		Server: &grpcConfig{
 			BindAddr: "127.0.0.1",
 			Port:     int(pb.Const_DefaultGrpcServicePort),
+			Insecure: false,
 			TLSCert:  filepath.Join(flagKeyringDir, "vault_cert.pem"),
 			TLSKey:   filepath.Join(flagKeyringDir, "vault_key.pem"),
 		},
 		P2P: &p2pConfig{
 			MDNS:     true,
-			URI:      "/DISCOVERY",
+			URI:      "/DISCOVERY", // TODO: what should this be?
 			TCPAddr:  "127.0.0.1",
 			TCPPort:  9051,
 			QUICAddr: "127.0.0.1",
 			QUICPort: 9051,
 		},
-		Logging: &loggingConfig{
-			Level: flagLogLevel,
+		Metrics: &metricsConfig{
+			LogLevel:     flagLogLevel,
+			LogFormat:    "text",
+			DebugAddr:    "127.0.0.1",
+			DebugPort:    9052,
+			DisableDebug: false,
 		},
 	}
+	if isTTY() {
+		src.Metrics.LogFormat = "cli"
+	}
+
 	return src
 }
 
@@ -189,10 +203,12 @@ type Config struct {
 	ServerConfig *server.Config
 	StoreConfig  *store.Config
 	P2PConfig    *p2p.Config
+	Metrics      *metrics.Config
 }
 
 func NewConfig() *Config {
 	src := newConfigSource()
+
 	cfg := &Config{
 		StoreConfig: &store.Config{
 			DataDir:      src.Store.DataDir,
@@ -202,6 +218,7 @@ func NewConfig() *Config {
 		ServerConfig: &server.Config{
 			Addr:        src.Server.BindAddr,
 			Port:        src.Server.Port,
+			Insecure:    src.Server.Insecure,
 			TLSCertPath: src.Server.TLSCert,
 			TLSKeyPath:  src.Server.TLSKey,
 			Log:         log.WithFields(log.Fields{"service": "server"}),
@@ -216,10 +233,26 @@ func NewConfig() *Config {
 			KeyFile:  filepath.Join(src.KeyDir, "vault.key"),
 			Log:      log.WithFields(log.Fields{"service": "p2p"}),
 		},
+		Metrics: &metrics.Config{
+			LogLevel:     src.Metrics.LogLevel,
+			LogFormat:    src.Metrics.LogFormat,
+			DebugAddr:    src.Metrics.DebugAddr,
+			DebugPort:    src.Metrics.DebugPort,
+			DisableDebug: src.Metrics.DisableDebug,
+		},
 	}
 
 	cfg.StoreConfig.Init()
 	cfg.ServerConfig.Init()
 	cfg.P2PConfig.Init()
+	cfg.Metrics.Init()
 	return cfg
+}
+
+func isTTY() bool {
+	fileInfo, _ := os.Stdout.Stat()
+	if (fileInfo.Mode() & os.ModeCharDevice) != 0 {
+		return true
+	}
+	return false
 }
