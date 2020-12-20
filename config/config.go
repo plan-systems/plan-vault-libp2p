@@ -251,8 +251,5 @@ func NewConfig() *Config {
 
 func isTTY() bool {
 	fileInfo, _ := os.Stdout.Stat()
-	if (fileInfo.Mode() & os.ModeCharDevice) != 0 {
-		return true
-	}
-	return false
+	return (fileInfo.Mode() & os.ModeCharDevice) != 0
 }

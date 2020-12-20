@@ -46,12 +46,13 @@ func Run(ctx context.Context, db *store.Store, cfg *Config) {
 		opts = []grpc.ServerOption{grpc.Creds(creds)}
 	}
 
-	// TODO: look thru the options to thread a context thru here
 	grpcServer := grpc.NewServer(opts...)
+	go func() { <-ctx.Done(); grpcServer.GracefulStop() }()
 
 	vaultSrv := &VaultServer{ctx: ctx, db: db, log: cfg.Log}
 	pb.RegisterVaultGrpcServer(grpcServer, vaultSrv)
 	grpcServer.Serve(listener)
+
 }
 
 type VaultServer struct {
