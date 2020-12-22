@@ -143,7 +143,7 @@ func (s *Store) Channel(id ChannelID) (*Channel, error) {
 	channel.subscribers = map[helpers.UUID]*subscriber{}
 	s.channels[id] = channel
 	if s.updateCh != nil {
-		s.updateCh <- channel
+		go func() { s.updateCh <- channel }()
 	}
 	channel.watch()
 	return channel, nil
