@@ -1,6 +1,7 @@
 package keyring
 
 import (
+	"encoding/base64"
 	"errors"
 
 	"github.com/libp2p/go-libp2p-core/crypto"
@@ -56,6 +57,16 @@ func MemberPublicKeyFromBytes(b []byte) MemberPublicKey {
 	pubkey := [32]byte{}
 	copy(pubkey[:], b)
 	return MemberPublicKey(&pubkey)
+}
+
+func MemberPublicKeyDecodeBase64(s string) (MemberPublicKey, error) {
+	b, err := base64.StdEncoding.DecodeString(s)
+	if err != nil {
+		return nil, err
+	}
+	pubkey := [32]byte{}
+	copy(pubkey[:], b)
+	return MemberPublicKey(&pubkey), nil
 }
 
 func MemberIDFromString(s string) MemberID {

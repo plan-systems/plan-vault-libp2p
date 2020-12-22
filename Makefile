@@ -17,12 +17,22 @@ GOFILES = $(shell find . -type f -name '*.go')
 .PHONY: build
 
 ## build the vault binary
-build: bin/vault
+build: bin/vault bin/test bin/client
 
 bin/vault: $(GOFILES)
 	GOPRIVATE='github.com/libp2p/*' go build \
 		-trimpath \
 		-o bin/vault
+
+bin/test: $(GOFILES)
+	GOPRIVATE='github.com/libp2p/*' go build \
+		-trimpath \
+		-o bin/test ./tests
+
+bin/client: $(GOFILES)
+	GOPRIVATE='github.com/libp2p/*' go build \
+		-trimpath \
+		-o bin/client ./tui
 
 # ----------------------------------------
 # test
