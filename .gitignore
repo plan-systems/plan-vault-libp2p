@@ -17,3 +17,5 @@
 # Build output
 bin/
 vault.json
+tests/vault1/
+tests/vault2/

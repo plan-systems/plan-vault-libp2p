@@ -58,6 +58,10 @@ check:
 		exit 1; fi
 	@echo ' ... ok!'
 
+.PHONY: tests/setup
+tests/setup:
+	./tests/setup.sh
+
 # ----------------------------------------
 # tooling
 
