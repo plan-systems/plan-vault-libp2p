@@ -83,6 +83,7 @@ tools:
 ## remove build artifacts
 clean:
 	rm -rf ./bin
+	rm -rf ./tests/{vault1,vault2,client1,client2}
 
 ## remove build artifacts and all generated code
 nuke: clean

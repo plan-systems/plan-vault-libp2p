@@ -43,6 +43,29 @@ gen_config() {
                 )
 
     ${SRC_DIR}/../bin/vault -print | jq "$args" > "${DIR}/etc/vault.json"
+
+    # make a matching client
+    CLIENT_DIR="${SRC_DIR}/client${i}"
+    mkdir -p "${CLIENT_DIR}/etc"
+    args=$(printf \
+           '.keyring_dir = "%s" |
+           del(.store) |
+           .server.port = %s |
+           .server.tls_cert_file = "%s" |
+           del(.server.tls_key_file) |
+           del(.p2p.mdns) |
+           del(.p2p.tcp_port) |
+           del(.p2p.tcp_addr) |
+           del(.p2p.quic_port) |
+           del(.p2p.quic_addr) |
+           del(.debug)
+           ' \
+               "${CLIENT_DIR}/etc" \
+               "509$i" \
+               "${DIR}/etc/server.crt" \
+               )
+    ${SRC_DIR}/../bin/vault -print | jq "$args" > "${CLIENT_DIR}/etc/vault.json"
+
 }
 
 gen_config 1

@@ -14,8 +14,13 @@
 # Dependency directories (remove the comment below to include it)
 # vendor/
 
-# Build output
-bin/
+# Testing configurations
+vault.key
 vault.json
 tests/vault1/
 tests/vault2/
+tests/client1/
+tests/client2/
+
+# Build output
+bin/
