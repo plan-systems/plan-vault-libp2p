@@ -14,7 +14,6 @@ import (
 	"github.com/plan-systems/plan-vault-libp2p/config"
 	"github.com/plan-systems/plan-vault-libp2p/keyring"
 	"github.com/plan-systems/plan-vault-libp2p/p2p"
-	pb "github.com/plan-systems/plan-vault-libp2p/protos"
 )
 
 func main() {
@@ -34,38 +33,26 @@ func main() {
 	}
 }
 
-type MessageContent = string
-type MessageSwitchMode = int
-type MessageError = error
-type MessageEntry = *pb.Msg
-type MessageWorkDone = struct{}
-
 func initialModel(cfg *config.Config) tea.Model {
 	ctx, cancel := context.WithCancel(context.Background())
 
-	// if either of these fail, we'll just bail and not bother
-	// setting up the UI
-	client := connect(ctx, cfg.ServerConfig)
+	// if this fails, we'll just bail and not bother setting up the UI
 	kr := openKeyring(cfg.P2PConfig)
 
-	m := model{
+	return model{
+		cfg:     cfg,
 		ctx:     ctx,
 		cancel:  cancel,
-		client:  client,
 		keyring: kr,
 		modes: []tea.Model{
 			newSelectorMode(),
-			newChannelOpenMode(client),
-			newChannelCloseMode(client),
-			newSendMode(client, kr),
-			newPeerAddMode(client, kr, cfg.P2PConfig.URI),
-			newMemberAddMode(kr),
-		}}
-	m.mode = ModeSelector
-
-	go pollClient(m)
-
-	return m
+			newChannelOpenMode(),
+			newChannelCloseMode(),
+			newSendMode(),
+			newPeerAddMode(cfg.P2PConfig.URI),
+			newMemberAddMode(),
+		},
+	}
 }
 
 func openKeyring(cfg *p2p.Config) *keyring.KeyRing {
@@ -79,10 +66,10 @@ func openKeyring(cfg *p2p.Config) *keyring.KeyRing {
 type model struct {
 	ctx    context.Context
 	cancel context.CancelFunc
+	cfg    *config.Config
 
 	client  *vclient.Client
 	keyring *keyring.KeyRing
-	entryCh chan MessageEntry
 
 	content  string
 	ready    bool
@@ -93,7 +80,7 @@ type model struct {
 }
 
 func (m model) Init() tea.Cmd {
-	return nil
+	return connectCmd(m)
 }
 
 const (
@@ -134,6 +121,11 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.viewport.Height = msg.Height - verticalMargins
 		}
 
+	case MessageConnected:
+		m.client = msg
+		m.content += "connected!\n"
+		cmds = append(cmds, pollNextEntry(m))
+
 	case MessageSwitchMode:
 		m.mode = msg
 
@@ -143,6 +135,21 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case MessageContent:
 		m.content += msg
+
+	case MessageOpenURI:
+		cmds = append(cmds, handleOpenURI(m, msg))
+
+	case MessageCloseURI:
+		cmds = append(cmds, handleCloseURI(m, msg))
+
+	case MessageSend:
+		cmds = append(cmds, handleSendMessage(m, msg))
+
+	case MessagePeerAdd:
+		cmds = append(cmds, handlePeerAdd(m, msg))
+
+	case MessageMemberAdd:
+		cmds = append(cmds, handleMemberAdd(m, msg))
 	}
 
 	m.viewport, cmd = m.viewport.Update(msg)

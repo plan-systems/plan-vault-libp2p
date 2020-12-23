@@ -19,7 +19,7 @@ type inputMode struct {
 	spinner      spinner.Model
 	submitButton string
 
-	workFunc func(inputMode) tea.Cmd // should close over the inputMode to validate
+	submitFunc func(inputMode) tea.Cmd // should close over the inputMode to validate
 
 	working bool
 	index   int
@@ -31,7 +31,7 @@ type inputModeOpt struct {
 	placeholder string
 }
 
-func newInputMode(title string, opts []inputModeOpt) inputMode {
+func newInputMode(title string, opts []inputModeOpt, submitFunc func(inputMode) tea.Cmd) inputMode {
 
 	m := inputMode{
 		title:      title,
@@ -62,9 +62,10 @@ func newInputMode(title string, opts []inputModeOpt) inputMode {
 
 	s := spinner.NewModel()
 	s.Spinner = spinner.Dot
-
 	m.spinner = s
+
 	m.submitButton = blurredSubmitButton
+	m.submitFunc = submitFunc
 
 	return m
 }
@@ -110,7 +111,7 @@ func (m inputMode) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "tab", "shift+tab", "enter", "up", "down":
 			if s == "enter" && m.index == len(m.inputs) {
 				m.working = true
-				return m, tea.Batch(spinner.Tick, m.workFunc(m))
+				return m, tea.Batch(spinner.Tick, m.submitFunc(m))
 			}
 			if s == "up" || s == "shift-tab" {
 				m.index--
