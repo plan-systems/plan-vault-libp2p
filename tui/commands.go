@@ -15,8 +15,8 @@ import (
 	pb "github.com/plan-systems/plan-vault-libp2p/protos"
 )
 
-// pollNextEntry for activity from the client and deliver it to the
-// next Update
+// pollNextEntry blocks on entries from the vault client and delivers
+// them as messages for the next Update
 func pollNextEntry(m model) tea.Cmd {
 	return func() tea.Msg {
 		select {
@@ -32,10 +32,10 @@ func pollNextEntry(m model) tea.Cmd {
 	}
 }
 
-func connectCmd(m model) tea.Cmd {
-
+// connect opens a gRPC connection to the Vault described in the
+// server configuration.
+func connect(m model) tea.Cmd {
 	return func() tea.Msg {
-		//func connect(ctx context.Context, cfg *server.Config) *vclient.Client {
 		cfg := m.cfg.ServerConfig
 		addr := fmt.Sprintf("%s:%d", cfg.Addr, cfg.Port)
 
@@ -58,6 +58,8 @@ func connectCmd(m model) tea.Cmd {
 	}
 }
 
+// handleEntry decodes a new Vault entry and turns it into either
+// progress/error message or new content
 func handleEntry(kr *keyring.KeyRing, entry *pb.Msg) tea.Cmd {
 	return func() tea.Msg {
 		body, err := kr.DecodeEntry(entry)
@@ -76,6 +78,7 @@ func handleEntry(kr *keyring.KeyRing, entry *pb.Msg) tea.Cmd {
 	}
 }
 
+// handleOpenURI opens a new polling feed request to the Vault
 func handleOpenURI(m model, msg MessageOpenURI) tea.Cmd {
 	return func() tea.Msg {
 		err := validateNonEmpty([][]string{{msg.uri, "missing channel URI"}})
@@ -90,6 +93,7 @@ func handleOpenURI(m model, msg MessageOpenURI) tea.Cmd {
 	}
 }
 
+// handleOpenURI closes an existing polling feed request to the Vault
 func handleCloseURI(m model, msg MessageCloseURI) tea.Cmd {
 	return func() tea.Msg {
 		err := validateNonEmpty([][]string{{msg.uri, "missing channel URI"}})
@@ -104,6 +108,7 @@ func handleCloseURI(m model, msg MessageCloseURI) tea.Cmd {
 	}
 }
 
+// handleSendMessage appends a new entry on the channel
 func handleSendMessage(m model, msg MessageSend) tea.Cmd {
 	return func() tea.Msg {
 
@@ -132,6 +137,7 @@ func handleSendMessage(m model, msg MessageSend) tea.Cmd {
 	}
 }
 
+// handlePeerAdd tells the vault to join one of its peers
 func handlePeerAdd(m model, msg MessagePeerAdd) tea.Cmd {
 	return func() tea.Msg {
 		err := validateNonEmpty([][]string{
@@ -173,6 +179,8 @@ func handlePeerAdd(m model, msg MessagePeerAdd) tea.Cmd {
 	}
 }
 
+// handleMemberAdd adds a new Member key to our keyring so we can decode
+// its messages
 func handleMemberAdd(m model, msg MessageMemberAdd) tea.Cmd {
 	return func() tea.Msg {
 		err := validateNonEmpty([][]string{

@@ -80,7 +80,7 @@ type model struct {
 }
 
 func (m model) Init() tea.Cmd {
-	return connectCmd(m)
+	return connect(m)
 }
 
 const (
