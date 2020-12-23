@@ -99,6 +99,12 @@ func (m selectorMode) View() string {
 	return content
 }
 
+func switchMode(mode int) tea.Cmd {
+	return func() tea.Msg {
+		return MessageSwitchMode(mode)
+	}
+}
+
 func newChannelOpenMode() inputMode { // }client *vclient.Client) inputMode {
 	return newInputMode("Open Channel",
 		[]inputModeOpt{

@@ -169,9 +169,3 @@ func (m model) View() string {
 	divider := strings.Repeat("─", m.viewport.Width)
 	return m.viewport.View() + divider + m.modes[m.mode].View()
 }
-
-func switchMode(mode int) tea.Cmd {
-	return func() tea.Msg {
-		return MessageSwitchMode(mode)
-	}
-}
