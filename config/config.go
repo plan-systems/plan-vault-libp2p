@@ -9,6 +9,9 @@ import (
 	"path/filepath"
 
 	"github.com/apex/log"
+	clilog "github.com/apex/log/handlers/cli"
+	jsonlog "github.com/apex/log/handlers/json"
+	textlog "github.com/apex/log/handlers/text"
 	"github.com/mitchellh/go-homedir"
 
 	"github.com/plan-systems/plan-vault-libp2p/metrics"
@@ -208,6 +211,16 @@ type Config struct {
 
 func NewConfig() *Config {
 	src := newConfigSource()
+
+	log.SetLevelFromString(src.Metrics.LogLevel)
+	switch src.Metrics.LogFormat {
+	case "cli":
+		log.SetHandler(clilog.Default)
+	case "json":
+		log.SetHandler(jsonlog.Default)
+	default:
+		log.SetHandler(textlog.Default)
+	}
 
 	cfg := &Config{
 		StoreConfig: &store.Config{
