@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/apex/log"
 	metrics "github.com/armon/go-metrics"
 	badger "github.com/dgraph-io/badger/v2"
 	"google.golang.org/protobuf/proto"
@@ -65,6 +66,7 @@ Design notes on schema:
 type Store struct {
 	db  *badger.DB
 	ctx context.Context
+	log *log.Entry
 
 	updateCh chan *Channel
 	channels map[ChannelID]*Channel
@@ -96,6 +98,7 @@ func New(ctx context.Context, cfg *Config) (*Store, error) {
 	store := &Store{
 		db:       db,
 		ctx:      ctx,
+		log:      cfg.Log,
 		updateCh: nil,
 		channels: map[ChannelID]*Channel{},
 	}
