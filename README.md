@@ -13,7 +13,7 @@ use GitHub issues to track progress.
 
 ### Build
 
-Requires golang 1.15. To build: `make build`
+Requires golang 1.16. To build: `make build`
 
 ### Development
 

@@ -20,16 +20,19 @@ GOFILES = $(shell find . -type f -name '*.go')
 build: bin/vault bin/test bin/client
 
 bin/vault: $(GOFILES)
+	CGO_ENABLED=0 \
 	GOPRIVATE='github.com/libp2p/*' go build \
 		-trimpath \
 		-o bin/vault
 
 bin/test: $(GOFILES)
+	CGO_ENABLED=0 \
 	GOPRIVATE='github.com/libp2p/*' go build \
 		-trimpath \
 		-o bin/test ./tests
 
 bin/client: $(GOFILES)
+	CGO_ENABLED=0 \
 	GOPRIVATE='github.com/libp2p/*' go build \
 		-trimpath \
 		-o bin/client ./tui
@@ -77,18 +80,18 @@ tests/setup:
 
 ## install protobuf tools
 tools:
-	go get github.com/golang/protobuf/protoc-gen-go \
-		google.golang.org/grpc/cmd/protoc-gen-go-grpc
+	go install google.golang.org/protobuf/cmd/protoc-gen-go
+	go get google.golang.org/grpc/cmd/protoc-gen-go-grpc
 
 ## remove build artifacts
 clean:
 	rm -rf ./bin
 	rm -rf ./tests/{vault1,vault2,client1,client2}
+	rm -rf cover.out
 
 ## remove build artifacts and all generated code
 nuke: clean
-	rm -f vault.pb.go
-	rm -f vault_grpc.pb.go
+	rm -f protos/*.pb.go
 
 # ----------------------------------------
 # protobuffers

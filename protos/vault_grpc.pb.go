@@ -11,6 +11,7 @@ import (
 
 // This is a compile-time assertion to ensure that this generated file
 // is compatible with the grpc package it is being compiled against.
+// Requires gRPC-Go v1.32.0 or later.
 const _ = grpc.SupportPackageIsVersion7
 
 // VaultGrpcClient is the client API for VaultGrpc service.
@@ -32,7 +33,7 @@ func NewVaultGrpcClient(cc grpc.ClientConnInterface) VaultGrpcClient {
 }
 
 func (c *vaultGrpcClient) VaultSession(ctx context.Context, opts ...grpc.CallOption) (VaultGrpc_VaultSessionClient, error) {
-	stream, err := c.cc.NewStream(ctx, &_VaultGrpc_serviceDesc.Streams[0], "/vault.VaultGrpc/VaultSession", opts...)
+	stream, err := c.cc.NewStream(ctx, &VaultGrpc_ServiceDesc.Streams[0], "/vault.VaultGrpc/VaultSession", opts...)
 	if err != nil {
 		return nil, err
 	}
@@ -89,8 +90,8 @@ type UnsafeVaultGrpcServer interface {
 	mustEmbedUnimplementedVaultGrpcServer()
 }
 
-func RegisterVaultGrpcServer(s *grpc.Server, srv VaultGrpcServer) {
-	s.RegisterService(&_VaultGrpc_serviceDesc, srv)
+func RegisterVaultGrpcServer(s grpc.ServiceRegistrar, srv VaultGrpcServer) {
+	s.RegisterService(&VaultGrpc_ServiceDesc, srv)
 }
 
 func _VaultGrpc_VaultSession_Handler(srv interface{}, stream grpc.ServerStream) error {
@@ -119,7 +120,10 @@ func (x *vaultGrpcVaultSessionServer) Recv() (*FeedReq, error) {
 	return m, nil
 }
 
-var _VaultGrpc_serviceDesc = grpc.ServiceDesc{
+// VaultGrpc_ServiceDesc is the grpc.ServiceDesc for VaultGrpc service.
+// It's only intended for direct use with grpc.RegisterService,
+// and not to be introspected or modified (even as a copy)
+var VaultGrpc_ServiceDesc = grpc.ServiceDesc{
 	ServiceName: "vault.VaultGrpc",
 	HandlerType: (*VaultGrpcServer)(nil),
 	Methods:     []grpc.MethodDesc{},
