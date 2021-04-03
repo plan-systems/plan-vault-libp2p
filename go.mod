@@ -1,6 +1,6 @@
 module github.com/plan-systems/plan-vault-libp2p
 
-go 1.15
+go 1.16
 
 require (
 	github.com/apex/log v1.9.0
