@@ -1,3 +1,49 @@
+/*
+The Store serves as an intermediary between the Server and the p2p
+Node Host. Vault clients should be able to durably write the Store without
+connections to Vault peers. Both services acts as clients of the
+Store and watch it for changes to stream to either the Vault client or
+the host's peers.
+
+Design notes on schema
+
+Badger is a pure K/V store without a table/collection abstraction,
+but keeping open a large number of DBs is likely to run into ulimits
+usability issues (not to mention spawning large numbers of
+goroutines), so we want to use a single table space.
+
+EntryIDs are 30 bytes, sortable by timestamp and including a random
+component sufficient to prevent collisions.
+
+Because peers can come and go, we may get "historical" entries from
+those peers from a large time window in the past (configurable by
+the community but expected to be on the order of days and weeks, not
+seconds).
+
+Therefore, in addition to the Entries keyspace, we'll have an
+ArrivalIndex keyspace (with zero-values) which gives us ordered keys
+for when entries were received by this peer. A client that comes
+online can use its last ArrivalIndex to ask the vault for the keys
+that it missed while disconnected.
+
+The ArrivalIndex can be "aged out".
+
+Entry key schema (63 bytes):
+
+  bytes  00:31  channel ID (sha256)
+  byte   32     table space (Entries) + reserved control bits
+  bytes  34:63  entry ID
+
+ArrivalIndex key schema (69 bytes):
+
+  bytes  00:31  channel ID (sha256)
+  byte   32     table space (ArrivalIndex) + reserved control bits
+  bytes  33:38  timestamp in unix seconds (UTC, big endian)
+  bytes  39:69  entry ID
+
+Entry value schema is a protos.Msg w/ Op and ReqID left unset.
+
+*/
 package store
 
 import (
@@ -16,52 +62,6 @@ import (
 	"github.com/plan-systems/plan-vault-libp2p/helpers"
 	pb "github.com/plan-systems/plan-vault-libp2p/protos"
 )
-
-/*
-
-The Store serves as an intermediary between the Server and the p2p
-Node Host. Vault clients should be able to durably write the Store without
-connections to Vault peers. Both services acts as clients of the
-Store and watch it for changes to stream to either the Vault client or
-the host's peers.
-
-Design notes on schema:
-
-* badger is a pure K/V store without a table/collection abstraction,
-  but keeping open a large number of DBs is likely to run into ulimits
-  usability issues (not to mention spawning large numbers of
-  goroutines), so we want to use a single table space.
-
-* EntryIDs are 30 bytes, sortable by timestamp and including a random
-  component sufficient to prevent collisions.
-
-* Because peers can come and go, we may get "historical" entries from
-  those peers from a large time window in the past (configurable by
-  the community but expected to be on the order of days and weeks, not
-  seconds).
-
-* Therefore, in addition to the Entries keyspace, we'll have an
-  ArrivalIndex keyspace (with zero-values) which gives us ordered keys
-  for when entries were received *by this peer*. A client that comes
-  online can use its last ArrivalIndex to ask the vault for the keys
-  that it missed while disconnected.
-
-* The ArrivalIndex can be "aged out"
-
-* Entry key schema (63 bytes):
-  * bytes 00:31 channel ID (sha256)
-  * byte  32    table space (Entries) + reserved control bits
-  * bytes 34:63 entry ID
-
-* ArrivalIndex key schema (69 bytes):
-  * bytes 00:31 channel ID (sha256)
-  * byte  32    table space (ArrivalIndex) + reserved control bits
-  * bytes 33:38 timestamp in unix seconds (UTC, big endian)
-  * bytes 39:69 entry ID
-
-* Entry value schema is a protos.Msg w/ Op and ReqID left unset
-
-*/
 
 type Store struct {
 	db  *badger.DB
