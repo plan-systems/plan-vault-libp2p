@@ -1,0 +1,91 @@
+digraph PLAN {
+
+  rankdir=LR;
+  compound=true;
+
+  node [style="rounded,filled,bold", width=1.3, fontname="Arial"];
+
+  node [shape="record", fillcolor=""]
+  iface_vault [label = "{{Vault (interface)|Open()\lClose()\lAppend(proto)\lCancel()\l|streaming\l}}", tooltip="golang interface\nfor streaming entries\nto Vault"]
+
+  node [shape="box"]
+  edge [style=bold, fontname="Arial", weight=2]
+
+  Unity [fillcolor="#ffaaff", tooltip="user-facing client"];
+  mDNS  [fillcolor="#55ffff", tooltip="LAN peer discovery"];
+  peers [fillcolor="#55ffff", tooltip="other Vaults on the WAN"];
+
+  {
+    rank=same; Unity mDNS peers;
+  }
+
+  subgraph cluster_vault {
+    label="VAULT PROCESS";
+
+    node [fillcolor="#cacaff"];
+
+    badger [label="badger", fillcolor="#a0a0ff", tooltip="LSM database"];
+    vault_server [label = "Vault server\nimpl Vault [streaming]\nOpen()\lClose()\lAppend(proto)\lCancel()\l", tooltip="server API for\nstreaming Entries"]
+    store [label = "Store\nChannel() ch\lAppend(proto)\lSubscribe() proto\l", tooltip="translates badger\nAPI to stream"]
+
+    gRPC_server [label = "gRPC server\n[streaming]\nAccept()\l", fillcolor="#eeaaee", tooltip="gRPC bidirectional\nstreaming server:\nproxies Vault server"]
+
+    node [fillcolor="#a0ffa0"];
+
+    keyring_v [label = "Keyring\nEncode([]byte, ch) proto\lDecode(proto) []byte\l", fillcolor="", tooltip="headless SKI\nimplementation"]
+    peerState [label="Peerstore Ring State:\ninmem radix trie", tooltip="in-memory representation\nof peerstore"];
+    topicState [label="Topic Publisher\nRing State:\ninmem sync map", tooltip="in-memory representation\nof topic publisher's state"];
+    p2pHost [label="p2p Host", fillcolor="#55cccc", tooltip="libp2p Host\nimplementation:\nmostly libp2p code"];
+    peerstore [label = "Peerstore Ring\nimpl libp2p.Datastore\nGet()\lHas()\lQuery()\lDelete()\lBatch()\l", tooltip="implementation of libp2p\ndatastore interface for\nrecording peer state"]
+    peerstore_client [label = "peerstore vault client\nimpl Vault [streaming]\nOpen()\lClose()\lAppend(proto)\lCancel()\l", tooltip="client API for\nstreaming Entries"]
+    topicstore [label="Topic Publisher Ring", tooltip="publishes Entries\nto libp2p host\nfor other peers"];
+
+    { rank=same; keyring_v peerstore_client; }
+    { rank=same; gRPC_server vault_server; }
+    { rank=same; topicstore peerstore;}
+
+    mDNS -> p2pHost;
+    peers -> p2pHost;
+
+    p2pHost -> peerstore;
+    peerstore -> peerState [dir="both"];
+    peerState -> peerstore_client [dir="both"];
+    peerstore_client -> keyring_v [weight=0.5; style=dashed];
+    keyring_v -> peerstore_client [weight=0.5; style=dashed];
+    peerstore_client -> vault_server;
+
+    p2pHost -> topicstore [dir="back"];
+    topicstore -> topicState [dir="both"];
+    topicState -> peerstore_client [dir="both"];
+
+    gRPC_server -> vault_server;
+    vault_server -> store;
+    store -> badger;
+  }
+
+  subgraph cluster_pnode {
+
+    label="PNODE PROCESS";
+    node [fillcolor="#ffa0a0"];
+
+    keyring_p [label = "Keyring\nEncode([]byte, ch) proto\lDecode(proto) []byte\l",fillcolor="", tooltip="user-facing SKI implementation"]
+    ring_state [label="ring state\n(channel-defined)", fillcolor="#ffa0a0", tooltip="whatever data structure this\nchannel uses for in-memory\nrepresentation of state"];
+    ring_iface [label="ring interface\n(channel-defined)", tooltip="whatever API this\nchannel uses to\ntalk to Unity"];
+    pnode_client [label = "pnode vault client\nimpl Vault [streaming]\nOpen()\lClose()\lAppend(proto)\lCancel()\l", tooltip="client API for streaming Entries" ]
+    gRPC_client [label = "gRPC client\n[streaming]\nConnect()\l", fillcolor="#eeaaee", tooltip="proxies Vault client"]
+
+    { rank=same; pnode_client keyring_p ; }
+
+    Unity -> ring_iface [dir="both"];
+
+    ring_iface -> ring_state [dir="both"];
+    ring_state -> pnode_client [dir="both"];
+    pnode_client -> keyring_p [weight=0.5; style=dashed];
+    keyring_p -> pnode_client [weight=0.5; style=dashed];
+
+    pnode_client -> gRPC_client;
+    gRPC_client -> gRPC_server;
+
+  }
+
+}

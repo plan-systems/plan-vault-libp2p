@@ -116,3 +116,15 @@ protos/vault.pb.go: protos/vault.proto
 ## sync protobufs from the outer workspace
 protosync:
 	sed 's~syntax = "proto3";~syntax = "proto3";\noption go_package = "github.com/plan-systems/plan-vault-libp2p/protos";~' ../plan-protobufs/pkg/vault/vault.proto > protos/vault.proto
+
+
+# ----------------------------------------
+# documentation
+
+.PHONY: protos
+.SUFFIXES: .svg .dot
+
+docs: docs/architecture.svg
+
+docs/%.svg: docs/%.dot
+	dot -Tsvg $< -o $@
